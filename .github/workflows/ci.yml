@@ -8,8 +8,11 @@ on:
 
 jobs:
   api:
-    name: api (rust)
+    name: api (fastify)
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: api
     services:
       postgres:
         image: postgres:16-alpine
@@ -26,24 +29,36 @@ jobs:
           --health-retries 10
     env:
       DATABASE_URL: postgres://hush:hush@localhost:5432/hush
-      SQLX_OFFLINE: "true"
     steps:
       - uses: actions/checkout@v4
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: pnpm/action-setup@v4
         with:
-          components: rustfmt, clippy
+          version: 10
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: api/pnpm-lock.yaml
 
-      - name: fmt
-        run: cargo fmt --all -- --check
+      - name: install
+        run: pnpm install --frozen-lockfile
 
-      - name: clippy
-        run: cargo clippy --all-targets -- -D warnings
+      - name: migrate
+        run: pnpm run migrate:up
+
+      - name: typecheck
+        run: pnpm run typecheck
+
+      - name: lint
+        run: pnpm run lint
 
       - name: test
-        run: cargo test --all
+        run: pnpm run test
+
+      - name: build
+        run: pnpm run build
 
   dashboard:
     name: dashboard (next.js)

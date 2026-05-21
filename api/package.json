@@ -1,0 +1,56 @@
+{
+  "name": "@open-hush/api",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Hush API — Fastify + TypeScript implementation of hush-protocol/hush-api.yaml",
+  "license": "MIT",
+  "type": "module",
+  "main": "dist/index.js",
+  "engines": {
+    "node": ">=20",
+    "pnpm": ">=9"
+  },
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint . --max-warnings=0",
+    "test": "vitest run",
+    "migrate:up": "node-pg-migrate --migrations-dir ../migrations --migration-file-language sql up",
+    "migrate:down": "node-pg-migrate --migrations-dir ../migrations --migration-file-language sql down",
+    "migrate:create": "node-pg-migrate --migrations-dir ../migrations --migration-file-language sql create",
+    "provision-device": "tsx scripts/provision-device.ts"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.1051.0",
+    "@aws-sdk/s3-request-presigner": "^3.1051.0",
+    "@fastify/cookie": "^11.0.2",
+    "@fastify/cors": "^11.2.0",
+    "@fastify/jwt": "^10.1.0",
+    "@fastify/sensible": "^6.0.1",
+    "argon2": "^0.44.0",
+    "fastify": "^5.1.0",
+    "fastify-plugin": "^5.1.0",
+    "fastify-type-provider-zod": "^6.1.0",
+    "kysely": "^0.29.2",
+    "pg": "^8.21.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.15.0",
+    "@types/node": "^22.9.0",
+    "@types/pg": "^8.20.0",
+    "eslint": "^9.15.0",
+    "node-pg-migrate": "^8.0.4",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3",
+    "typescript-eslint": "^8.15.0",
+    "vitest": "^2.1.5"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "argon2"
+    ]
+  }
+}
