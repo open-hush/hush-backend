@@ -1,8 +1,3 @@
-# Rust
-target/
-**/*.rs.bk
-Cargo.lock.bak
-
 # Node
 node_modules/
 .next/
@@ -10,6 +5,9 @@ out/
 dist/
 .turbo/
 *.tsbuildinfo
+
+# pnpm
+.pnpm-store/
 
 # Local secrets / env
 .env
@@ -37,6 +35,7 @@ dist/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+pnpm-debug.log*
 
 # Local notes
 .notes/

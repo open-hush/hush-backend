@@ -1,19 +1,13 @@
 # migrations
 
-Postgres migrations applied with [`sqlx-cli`](https://github.com/launchbadge/sqlx/tree/main/sqlx-cli).
-
-## Apply
+Postgres migrations as plain `.sql` files, applied with [`node-pg-migrate`](https://salsita.github.io/node-pg-migrate/).
 
 ```bash
-cargo install sqlx-cli --no-default-features --features postgres
-sqlx migrate run --source migrations
-```
+# From hush-backend/api/
+pnpm exec node-pg-migrate --migrations-dir ../migrations up
 
-## Create a new migration
-
-```bash
-sqlx migrate add --source migrations <description>
-# Creates: migrations/<timestamp>_<description>.sql
+# Create a new migration
+pnpm exec node-pg-migrate --migrations-dir ../migrations create <description>
 ```
 
 ## Conventions

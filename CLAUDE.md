@@ -2,21 +2,21 @@
 
 You are working in **`hush-backend`**, which holds **two** projects that ship together:
 
-- `api/` — Rust + axum HTTP server.
-- `dashboard/` — Next.js 15 web dashboard.
+- `api/` — Node.js + Fastify HTTP server (TypeScript, pnpm).
+- `dashboard/` — Next.js 15 web dashboard (TypeScript, npm).
 
-Match commands to where you are working. Don't run `npm` in the workspace root, and don't run `cargo` inside `dashboard/`.
+Match commands to where you are working. Use `pnpm` inside `api/`, `npm` inside `dashboard/`. Never mix them, and don't run package managers at the repo root.
 
 ---
 
 ## OpenAPI source of truth — non-negotiable
 
-`hush-protocol/hush-api.yaml` is **the** contract. If you find request/response shapes invented in `api/src/models.rs` or in `dashboard/lib/api/` that aren't derived from the spec, that's a bug.
+`hush-protocol/hush-api.yaml` is **the** contract. Request/response shapes are derived from it; hand-rolled `interface`s for endpoint payloads in `api/src/` or `dashboard/lib/api/` are a bug.
 
 Drift detection (set up in phase 2):
 
-1. `cargo run -p api -- --emit-openapi > /tmp/generated.yaml`
-2. `diff` against `../hush-protocol/hush-api.yaml`
+1. The api emits its effective spec (e.g. `pnpm run emit:openapi > /tmp/generated.yaml`).
+2. `diff` against `../hush-protocol/hush-api.yaml`.
 3. Any difference fails CI.
 
 ---
@@ -25,51 +25,59 @@ Drift detection (set up in phase 2):
 
 ### Conventions
 
-- **Error model**: every fallible handler returns `Result<Json<T>, ApiError>`. `ApiError` is `thiserror`-derived, maps to HTTP status + JSON `Error` schema.
-- **Logging**: `tracing` exclusively. Never `println!`. `RUST_LOG=info,hush_api=debug,sqlx=warn` is the default; set in `.env`.
-- **DB access**: only via `sqlx` macros (`query!`, `query_as!`). Compile-time-checked. Plain string queries are not allowed.
-- **Auth extractors**: `JwtUser` for user endpoints, `DeviceClaims` for device endpoints. Both implement `FromRequestParts`. Build them from middleware in `api/src/auth/`.
-- **Doc comments**: every `pub fn` in a route module gets a `/// ` summary line — `utoipa` picks them up for the generated spec.
-- **Tests**: end-to-end tests live in `api/tests/`. Spawn the app over a random port with `tokio::test`. Reuse a per-test `sqlx::PgPool` against a transactional savepoint.
+- **Error model**: handlers throw via `@fastify/sensible` helpers (`reply.notFound()`, `reply.unauthorized()`, …) or via a typed `ApiError` mapped by a global error hook to the JSON `Error` schema.
+- **Logging**: Fastify's built-in pino logger only. Never `console.log`. `LOG_LEVEL=info` by default; set in `.env`.
+- **DB access**: through `kysely` (type-safe query builder) over `pg`. No ORM. All query code lives in `src/db/`; no raw string concatenation outside of migrations.
+- **Auth plugins**: an HMAC plugin for `/v1/device/*` and a JWT plugin for user routes, both decorating `request.user` / `request.device`. Live in `src/auth/`.
+- **Schemas**: each route declares its request/response with `zod` schemas, wired into Fastify through `fastify-type-provider-zod`. Handlers infer types from the schemas (`z.infer<typeof Schema>`); no hand-written `interface`s for endpoint payloads.
+- **Tests**: end-to-end tests use `app.inject()` from Fastify against a fresh server per test, with a transactional Postgres connection rolled back at teardown. Tests live in `api/test/`.
 
 ### Patterns
 
 | Concern | Where |
 |---|---|
-| Route handlers | `api/src/routes/<resource>.rs` |
-| Auth middleware + extractors | `api/src/auth/{hmac,jwt}.rs` |
-| DB queries | `api/src/db/<resource>.rs` |
-| Models (shared types) | `api/src/models.rs` |
-| S3 client + presigned URLs | `api/src/storage/s3.rs` |
-| ffmpeg invocation | `api/src/transcode/ffmpeg.rs` |
+| Server wiring | `api/src/server.ts` |
+| Entrypoint | `api/src/index.ts` |
+| Route plugins | `api/src/routes/<resource>.ts` |
+| Auth plugins | `api/src/auth/{hmac,jwt}.ts` |
+| DB queries | `api/src/db/<resource>.ts` |
+| Shared types (derived from OpenAPI) | `api/src/models.ts` |
+| S3 client + presigned URLs | `api/src/storage/s3.ts` |
+| ffmpeg invocation | `api/src/transcode/ffmpeg.ts` |
+| Transcode queue (in-process) | `api/src/transcode/queue.ts` |
+| Cursor pagination util | `api/src/util/cursor.ts` |
 
 ### Common commands
 
 ```bash
-# Bring up Postgres + MinIO
-docker compose up -d
+cd api
 
-# Apply migrations
-sqlx migrate run --source migrations
+# Install deps (pnpm)
+pnpm install
 
-# Compile-check the whole workspace
-cargo check
-
-# Run
-cargo run -p api
+# Dev (auto-reload via tsx)
+pnpm run dev
 # Listens on http://localhost:8080
 
-# Tests
-cargo test
+# Typecheck
+pnpm run typecheck
 
 # Lint
-cargo clippy --all-targets -- -D warnings
+pnpm run lint
 
-# Format
-cargo fmt
+# Tests
+pnpm run test
+
+# Production build
+pnpm run build && pnpm start
 ```
 
-If `sqlx` macro queries fail to compile, set `DATABASE_URL` (or run with `SQLX_OFFLINE=true` and a committed `.sqlx/` directory).
+Bring up the data plane first:
+
+```bash
+# From hush-backend/
+docker compose up -d   # Postgres + MinIO
+```
 
 ---
 
@@ -110,7 +118,7 @@ npm run gen:api      # reads ../../hush-protocol/hush-api.yaml → lib/api/
 
 ---
 
-## What lives in each NVS-equivalent
+## What lives where
 
 | State | Source of truth |
 |---|---|
@@ -131,6 +139,7 @@ Six phases in `PLAN.md`. Finish phase N before opening phase N+1. If you spot wo
 
 - Hosting (Fly vs Railway vs Hetzner)
 - Email provider (Postmark vs Resend)
+- OpenAPI emission tool (zod schemas → JSON Schema via `zod-to-json-schema` + `@fastify/swagger`, vs custom)
 - Migrations in prod (boot vs separate job)
 - Worker model (same process vs separate)
 - Multi-tenant device sharing
