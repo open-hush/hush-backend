@@ -3,6 +3,7 @@ import { Readable } from 'node:stream';
 import {
   DeleteObjectCommand,
   GetObjectCommand,
+  HeadBucketCommand,
   HeadObjectCommand,
   PutObjectCommand,
   S3Client,
@@ -145,6 +146,10 @@ export async function deleteObject(
   key: string,
 ): Promise<void> {
   await client.send(new DeleteObjectCommand({ Bucket: cfg.bucket, Key: key }));
+}
+
+export async function headBucket(client: S3Client, cfg: S3Config): Promise<void> {
+  await client.send(new HeadBucketCommand({ Bucket: cfg.bucket }));
 }
 
 function isNotFound(err: unknown): boolean {

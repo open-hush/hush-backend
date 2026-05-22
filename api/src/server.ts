@@ -2,6 +2,7 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import sensible from '@fastify/sensible';
 import cookie from '@fastify/cookie';
 import cors from '@fastify/cors';
+import fastifyMetrics from 'fastify-metrics';
 import {
   serializerCompiler,
   validatorCompiler,
@@ -22,6 +23,7 @@ import { deviceRoutes } from './routes/device.js';
 import { devicesRoutes } from './routes/devices.js';
 import { audioRoutes } from './routes/audio.js';
 import { firmwareRoutes } from './routes/firmware.js';
+import { readyRoutes } from './routes/ready.js';
 import { createS3Client, readS3Config, type S3Config } from './storage/s3.js';
 import { TranscodeQueue } from './transcode/queue.js';
 
@@ -91,6 +93,16 @@ export async function createServer(opts: CreateServerOptions = {}): Promise<Fast
 
   await app.register(sensible);
   await app.register(cookie);
+  if (process.env.METRICS_ENABLED !== 'false') {
+    // fastify-metrics ships with FastifyTypeProviderDefault generics, which
+    // do not unify with this server's ZodTypeProvider. The plugin itself is
+    // type-provider-agnostic at runtime, so cast through unknown.
+    await app.register(fastifyMetrics as unknown as Parameters<typeof app.register>[0], {
+      endpoint: '/metrics',
+      routeMetrics: { enabled: true },
+      defaultMetrics: { enabled: true },
+    });
+  }
   const allowedOrigins = (process.env.CORS_ALLOWED_ORIGINS ?? 'http://localhost:3000')
     .split(',')
     .map((o) => o.trim())
@@ -131,6 +143,7 @@ export async function createServer(opts: CreateServerOptions = {}): Promise<Fast
   });
 
   await app.register(healthRoutes, { prefix: '/v1' });
+  await app.register(readyRoutes({ db, s3, s3Config }), { prefix: '/v1' });
   await app.register(usersRoutes({ db }), { prefix: '/v1' });
   await app.register(deviceRoutes({ db, s3, s3Config }), { prefix: '/v1' });
   await app.register(devicesRoutes({ db }), { prefix: '/v1' });

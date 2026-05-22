@@ -68,6 +68,17 @@ export const HealthSchema = z.object({
   commit: z.string().optional(),
 });
 
+export const ReadyCheckSchema = z.object({
+  status: z.enum(['ok', 'error', 'timeout']),
+  latencyMs: z.number().int().nonnegative().optional(),
+  error: z.string().optional(),
+});
+
+export const ReadySchema = z.object({
+  status: z.enum(['ok', 'degraded']),
+  checks: z.record(z.string(), ReadyCheckSchema),
+});
+
 // Audio / phase 2
 
 export const ALLOWED_SOURCE_CONTENT_TYPES = [

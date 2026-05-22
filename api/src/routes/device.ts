@@ -220,7 +220,7 @@ export const deviceRoutes = (deps: DeviceDeps): FastifyPluginAsyncZod => async (
         .set({ last_seen_at: now })
         .where('id', '=', deviceId)
         .execute()
-        .catch((err) => app.log.warn({ err, deviceId }, 'sync: failed to update last_seen_at'));
+        .catch((err) => req.log.warn({ err, deviceId }, 'sync: failed to update last_seen_at'));
 
       return reply.code(200).send({
         serverTime: now.toISOString(),
@@ -272,7 +272,7 @@ export const deviceRoutes = (deps: DeviceDeps): FastifyPluginAsyncZod => async (
         .set({ last_seen_at: new Date() })
         .where('id', '=', deviceId)
         .execute()
-        .catch((err) => app.log.warn({ err, deviceId }, 'events: failed to update last_seen_at'));
+        .catch((err) => req.log.warn({ err, deviceId }, 'events: failed to update last_seen_at'));
 
       return reply.code(202).send(null);
     },
