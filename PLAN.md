@@ -100,9 +100,15 @@ Deferred:
 
 Acceptance: signed firmware artifacts are stored, devices can fetch them.
 
-- [ ] `GET /v1/firmware/latest` (per device hardware revision).
-- [ ] Manifest schema: `{ version, url, sha256, signature }`.
-- [ ] Maintainer CLI (or dashboard admin page) to upload signed builds.
+- [x] Migration 0004: `firmware_releases` (id, hw_rev, version, blob_key, sha256, signature, size_bytes, released_at, notes) with UNIQUE(hw_rev, version) and a `(hw_rev, released_at DESC)` index.
+- [x] `GET /v1/firmware/latest?hw_rev=...` (HMAC-authenticated). Returns the latest `FirmwareManifest` for the requested hardware revision; presigned GET URL with TTL `FIRMWARE_PRESIGN_TTL_SEC` (default 1800). 404 when no release exists.
+- [x] `FirmwareManifest` schema: `version, hwRev, url, expiresAt, sha256, signature, signatureAlgorithm: ed25519, sizeBytes, releasedAt, notes?`.
+- [x] Maintainer CLI: `pnpm run upload-firmware -- --hw-rev=r0 --version=0.2.0 --bin=./fw.bin --sig=./fw.sig [--notes="..."]`. Computes SHA-256, validates a 64-byte hex Ed25519 signature, uploads `firmware/<hw_rev>/<version>.bin` to S3, inserts the release row.
+- [x] 6 vitest schema tests added (35 green total).
+
+Channels (`stable` only) and a dashboard admin page for upload are deliberately out of scope; both can be added later as additive changes.
+
+> Pending verification (requires `docker compose up -d` for Postgres + MinIO): apply migration 0004, sign a test binary offline, run `upload-firmware`, then `GET /v1/firmware/latest?hw_rev=r0` with valid HMAC and verify the presigned URL serves the bytes.
 
 ## Phase 6 — Observability + production (~ongoing)
 

@@ -99,6 +99,18 @@ export interface DeviceEventsTable {
   received_at: Generated<Date>;
 }
 
+export interface FirmwareReleasesTable {
+  id: Generated<string>;
+  hw_rev: string;
+  version: string;
+  blob_key: string;
+  sha256: string;
+  signature: string;
+  size_bytes: number;
+  released_at: Generated<Date>;
+  notes: string | null;
+}
+
 export interface Database {
   users: UsersTable;
   refresh_tokens: RefreshTokensTable;
@@ -108,4 +120,5 @@ export interface Database {
   card_bindings: CardBindingsTable;
   device_configs: DeviceConfigsTable;
   device_events: DeviceEventsTable;
+  firmware_releases: FirmwareReleasesTable;
 }

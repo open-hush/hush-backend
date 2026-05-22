@@ -4,6 +4,8 @@ import {
   CardBindingRequestSchema,
   DeviceEventsRequestSchema,
   DeviceSyncResponseSchema,
+  FirmwareLatestQuerySchema,
+  FirmwareManifestSchema,
 } from '../src/schemas.js';
 
 describe('phase 3 schemas', () => {
@@ -43,5 +45,55 @@ describe('phase 3 schemas', () => {
       audio: [],
     });
     expect(ok.success).toBe(true);
+  });
+});
+
+describe('phase 5 schemas', () => {
+  const validManifest = {
+    version: '0.2.0',
+    hwRev: 'r0',
+    url: 'https://example.com/fw.bin?sig=x',
+    expiresAt: new Date(Date.now() + 1800_000).toISOString(),
+    sha256: 'a'.repeat(64),
+    signature: 'a'.repeat(128),
+    signatureAlgorithm: 'ed25519' as const,
+    sizeBytes: 1024,
+    releasedAt: new Date().toISOString(),
+  };
+
+  it('FirmwareLatestQuery accepts r0..rN, rejects garbage', () => {
+    expect(FirmwareLatestQuerySchema.safeParse({ hw_rev: 'r0' }).success).toBe(true);
+    expect(FirmwareLatestQuerySchema.safeParse({ hw_rev: 'r12' }).success).toBe(true);
+    expect(FirmwareLatestQuerySchema.safeParse({ hw_rev: 'R0' }).success).toBe(false);
+    expect(FirmwareLatestQuerySchema.safeParse({ hw_rev: 'beta' }).success).toBe(false);
+    expect(FirmwareLatestQuerySchema.safeParse({}).success).toBe(false);
+  });
+
+  it('FirmwareManifest accepts a fully populated payload', () => {
+    expect(FirmwareManifestSchema.safeParse(validManifest).success).toBe(true);
+  });
+
+  it('FirmwareManifest accepts optional notes', () => {
+    expect(
+      FirmwareManifestSchema.safeParse({ ...validManifest, notes: 'fixes BLE pairing' }).success,
+    ).toBe(true);
+  });
+
+  it('FirmwareManifest rejects non-hex sha256', () => {
+    expect(
+      FirmwareManifestSchema.safeParse({ ...validManifest, sha256: 'ZZZ' }).success,
+    ).toBe(false);
+  });
+
+  it('FirmwareManifest rejects non-ed25519 signature algorithm', () => {
+    expect(
+      FirmwareManifestSchema.safeParse({ ...validManifest, signatureAlgorithm: 'rsa' }).success,
+    ).toBe(false);
+  });
+
+  it('FirmwareManifest rejects negative sizeBytes', () => {
+    expect(
+      FirmwareManifestSchema.safeParse({ ...validManifest, sizeBytes: -1 }).success,
+    ).toBe(false);
   });
 });
