@@ -114,10 +114,10 @@ Channels (`stable` only) and a dashboard admin page for upload are deliberately 
 
 Acceptance: deployable, observable, recoverable.
 
-- [ ] Prometheus metrics (`/metrics`) — e.g. via `fastify-metrics`.
-- [ ] Healthchecks for downstream dependencies (DB, S3) at `/v1/ready`.
-- [ ] Structured access logs with `request_id` (pino + `@fastify/request-context`).
-- [ ] Hosting decision (open).
+- [x] Prometheus metrics at `/metrics` via `fastify-metrics` (default process + per-route histograms). Toggleable with `METRICS_ENABLED=false` for tests.
+- [x] `GET /v1/ready` with per-dependency checks: DB (`SELECT 1`) + S3 (`HeadBucket`), each gated by `READY_PROBE_TIMEOUT_MS` (default 2000). 200 when all `ok`, 503 with the same `Ready` schema otherwise so the probe response identifies the degraded dependency.
+- [x] Request id in every log line — Fastify's built-in `req.id` (auto-generated per request, surfaced as `reqId` by pino). `app.log` calls inside route handlers switched to `req.log` so background work scoped to a request keeps the same id. `@fastify/request-context` deferred — not needed unless we start propagating ids into deep code paths (DB, S3) without going through the request lifecycle.
+- [ ] Hosting decision (open). Fly.io vs. Railway vs. self-hosted on Hetzner.
 - [ ] Backup story documented (Postgres point-in-time recovery; S3 lifecycle).
 
 ---

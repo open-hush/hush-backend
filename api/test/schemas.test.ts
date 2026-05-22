@@ -6,6 +6,8 @@ import {
   DeviceSyncResponseSchema,
   FirmwareLatestQuerySchema,
   FirmwareManifestSchema,
+  ReadyCheckSchema,
+  ReadySchema,
 } from '../src/schemas.js';
 
 describe('phase 3 schemas', () => {
@@ -95,5 +97,43 @@ describe('phase 5 schemas', () => {
     expect(
       FirmwareManifestSchema.safeParse({ ...validManifest, sizeBytes: -1 }).success,
     ).toBe(false);
+  });
+});
+
+describe('phase 6 schemas', () => {
+  it('ReadyCheck accepts status ok with latencyMs', () => {
+    expect(ReadyCheckSchema.safeParse({ status: 'ok', latencyMs: 7 }).success).toBe(true);
+  });
+
+  it('ReadyCheck accepts status error with error message', () => {
+    expect(
+      ReadyCheckSchema.safeParse({ status: 'error', error: 'connection refused' }).success,
+    ).toBe(true);
+  });
+
+  it('ReadyCheck rejects unknown status', () => {
+    expect(ReadyCheckSchema.safeParse({ status: 'maybe' }).success).toBe(false);
+  });
+
+  it('Ready accepts ok with a map of checks', () => {
+    const ok = ReadySchema.safeParse({
+      status: 'ok',
+      checks: {
+        database: { status: 'ok', latencyMs: 3 },
+        objectStorage: { status: 'ok', latencyMs: 12 },
+      },
+    });
+    expect(ok.success).toBe(true);
+  });
+
+  it('Ready accepts degraded with mixed check statuses', () => {
+    const degraded = ReadySchema.safeParse({
+      status: 'degraded',
+      checks: {
+        database: { status: 'ok', latencyMs: 4 },
+        objectStorage: { status: 'error', error: 'connection refused' },
+      },
+    });
+    expect(degraded.success).toBe(true);
   });
 });
