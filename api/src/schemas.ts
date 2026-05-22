@@ -207,3 +207,24 @@ export const DeviceListSchema = z.object({
 export const CardBindingListSchema = z.object({
   items: z.array(CardBindingSchema),
 });
+
+// Phase 5 — firmware OTA
+
+export const HW_REV_RE = /^r[0-9]+$/;
+
+export const FirmwareLatestQuerySchema = z.object({
+  hw_rev: z.string().regex(HW_REV_RE),
+});
+
+export const FirmwareManifestSchema = z.object({
+  version: z.string().min(1),
+  hwRev: z.string().regex(HW_REV_RE),
+  url: z.string().url(),
+  expiresAt: z.string().datetime(),
+  sha256: z.string().regex(/^[0-9a-f]{64}$/),
+  signature: z.string().regex(/^[0-9a-f]+$/),
+  signatureAlgorithm: z.literal('ed25519'),
+  sizeBytes: z.number().int().nonnegative(),
+  releasedAt: z.string().datetime(),
+  notes: z.string().optional(),
+});
