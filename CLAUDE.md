@@ -13,7 +13,7 @@ Both projects use **pnpm** and run on **Node 24** (pinned in each `.nvmrc`). The
 
 Every dependency in any `package.json` (both `api/` and `dashboard/`) **must be pinned to an exact version**. No range operators ever: no `^`, no `~`, no `>=`, no `*`, no `x` wildcards. `"fastify": "5.2.1"`, never `"fastify": "^5.2.1"`.
 
-This is enforced mechanically by `save-exact=true` in each subproject's `.npmrc`, so `pnpm add` / `npm install` write exact versions by default. If you ever hand-edit a `package.json`, keep it exact. Reviewing a diff that introduces a range operator is a bug — flag it.
+This is enforced mechanically by `save-exact=true` in each subproject's `.npmrc`, so `pnpm add` writes exact versions by default. If you ever hand-edit a `package.json`, keep it exact. Reviewing a diff that introduces a range operator is a bug — flag it.
 
 ---
 

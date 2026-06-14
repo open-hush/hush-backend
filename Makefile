@@ -48,17 +48,17 @@ dashboard-install: ## Install dashboard deps (npm)
 # ---------------------------------------------------------------------------
 # Dev servers
 # ---------------------------------------------------------------------------
-.PHONY: api-dev dashboard-dev
-api-dev: ## Run the api in watch mode (http://localhost:8080)
+.PHONY: api-start dashboard-start
+api-start: ## Run the api in watch mode (http://localhost:8080)
 	cd $(API_DIR) && pnpm run dev
 
-dashboard-dev: ## Run the dashboard dev server (http://localhost:3000)
+dashboard-start: ## Run the dashboard dev server (http://localhost:3000)
 	cd $(DASH_DIR) && npm run dev
 
 # ---------------------------------------------------------------------------
 # Build / start
 # ---------------------------------------------------------------------------
-.PHONY: build api-build dashboard-build api-start dashboard-start
+.PHONY: build api-build dashboard-build
 build: api-build dashboard-build ## Production build for both projects
 
 api-build: ## Build the api (tsc)
@@ -66,12 +66,6 @@ api-build: ## Build the api (tsc)
 
 dashboard-build: ## Build the dashboard (next build)
 	cd $(DASH_DIR) && npm run build
-
-api-start: ## Start the built api (node dist)
-	cd $(API_DIR) && pnpm start
-
-dashboard-start: ## Start the built dashboard (next start)
-	cd $(DASH_DIR) && npm start
 
 # ---------------------------------------------------------------------------
 # Quality gates
