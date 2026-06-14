@@ -1,8 +1,8 @@
 # Local development stack for the Hush backend.
 #
 # `docker compose up -d` brings up Postgres and MinIO (S3-compatible object
-# storage) so `cargo run -p api` and `cd dashboard && npm run dev` can talk
-# to them out of the box.
+# storage) so `cd api && pnpm run dev` and `cd dashboard && pnpm run dev` can
+# talk to them out of the box.
 #
 # Production deploys this stack differently:
 #   - Postgres → managed service (e.g. Supabase, Neon, RDS).

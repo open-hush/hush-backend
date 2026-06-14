@@ -3,9 +3,9 @@
 You are working in **`hush-backend`**, which holds **two** projects that ship together:
 
 - `api/` — Node.js + Fastify HTTP server (TypeScript, pnpm).
-- `dashboard/` — Next.js 15 web dashboard (TypeScript, npm).
+- `dashboard/` — Next.js 15 web dashboard (TypeScript, pnpm).
 
-Match commands to where you are working. Use `pnpm` inside `api/`, `npm` inside `dashboard/`. Never mix them, and don't run package managers at the repo root.
+Both projects use **pnpm** and run on **Node 24** (pinned in each `.nvmrc`). They are **not** a pnpm workspace — each has its own `package.json` and `pnpm-lock.yaml`. Always `cd` into `api/` or `dashboard/` before running `pnpm`; never run a package manager at the repo root.
 
 ---
 
@@ -97,23 +97,23 @@ docker compose up -d   # Postgres + MinIO
 ```bash
 cd dashboard
 
-# Install deps
-npm install
+# Install deps (pnpm)
+pnpm install
 
 # Dev server
-npm run dev          # http://localhost:3000
+pnpm run dev         # http://localhost:3000
 
 # Production build (must pass before merging)
-npm run build
+pnpm run build
 
 # Typecheck (run separately for speed in CI)
-npm run typecheck
+pnpm run typecheck
 
 # Lint
-npm run lint
+pnpm run lint
 
 # Regenerate the API client from the OpenAPI spec
-npm run gen:api      # reads ../../hush-protocol/hush-api.yaml → lib/api/
+pnpm run gen:api     # reads ../../hush-protocol/hush-api.yaml → lib/api/
 ```
 
 ---

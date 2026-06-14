@@ -8,7 +8,7 @@
 # Build:    docker build -t open-hush/hush-api:dev .
 # Run:      docker run --env-file .env -p 8080:8080 open-hush/hush-api:dev
 
-ARG NODE_VERSION=22
+ARG NODE_VERSION=24
 
 FROM node:${NODE_VERSION}-bookworm-slim AS deps
 WORKDIR /build/api

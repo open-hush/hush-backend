@@ -6,8 +6,8 @@ This repo holds the Hush backend (Node.js + Fastify + TypeScript) **and** the Hu
 
 | Concern | Choice |
 |---|---|
-| API server | Node.js 22+, [Fastify](https://fastify.dev/) 5, TypeScript 5.6+ |
-| Package manager (api) | pnpm 10+ |
+| API server | Node.js 24, [Fastify](https://fastify.dev/) 5, TypeScript 5.6+ |
+| Package manager | pnpm 10+ (both `api/` and `dashboard/`; no workspace) |
 | DB | PostgreSQL 16 via [`kysely`](https://kysely.dev/) (type-safe query builder, no ORM, no codegen) over `pg` |
 | Migrations | Plain SQL files in `migrations/`, applied with [`node-pg-migrate`](https://salsita.github.io/node-pg-migrate/) |
 | Device auth | HMAC-SHA256 (per-device 32-byte secret) |
@@ -94,7 +94,7 @@ Deferred:
 - [ ] **"Scan unknown card → bind"** UX flow — depends on events feed.
 - [ ] **Device config edit** (light/deep sleep, volume, LED brightness) — needs `PATCH /v1/devices/:id/config` endpoint.
 
-> Pending verification (Docker + browser): `docker compose up -d`, `pnpm --dir api run migrate:up`, `pnpm --dir api run dev`, `npm --prefix dashboard run dev`, register → claim a provisioned device → upload audio → bind card.
+> Pending verification (Docker + browser): `docker compose up -d`, `pnpm --dir api run migrate:up`, `pnpm --dir api run dev`, `pnpm --dir dashboard run dev`, register → claim a provisioned device → upload audio → bind card.
 
 ## Phase 5 — OTA endpoint (~1 week)
 
@@ -125,7 +125,7 @@ Acceptance: deployable, observable, recoverable.
 ## Decisions taken
 
 - **Node + Fastify** over Rust + axum — same TS ecosystem as `dashboard/` and `hush-app`, lower friction.
-- **pnpm** for `api/` — fast installs, deterministic lockfile, good monorepo story if we expand later.
+- **pnpm** for both `api/` and `dashboard/` — fast installs, deterministic lockfile, one package manager across the repo. Kept as two independent projects (separate lockfiles), **not** a pnpm workspace.
 - **Postgres** (not SQLite, not MySQL) — JSON, listen/notify, mature operations.
 - **No ORM** — `kysely` query builder over `pg`. Type-safe, SQL stays explicit, no schema codegen step, no hidden N+1 traps.
 - **`node-pg-migrate`** for migrations — plain `.sql` files in `migrations/`, no coupling to the query layer.
