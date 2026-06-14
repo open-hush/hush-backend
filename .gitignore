@@ -10,6 +10,7 @@ dist/
 .pnpm-store/
 
 # Local secrets / env
+initial-admin-password.txt
 .env
 .env.local
 .env.development.local

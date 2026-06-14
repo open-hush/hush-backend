@@ -17,6 +17,7 @@ import { createDb, createPool } from './db/client.js';
 import type { Database } from './db/types.js';
 import { hmacPlugin, loadSecretFromDb } from './auth/hmac.js';
 import { jwtPlugin } from './auth/jwt.js';
+import { bootstrapFirstAdmin } from './auth/bootstrap.js';
 import { healthRoutes } from './routes/health.js';
 import { usersRoutes } from './routes/users.js';
 import { deviceRoutes } from './routes/device.js';
@@ -35,6 +36,12 @@ export interface CreateServerOptions {
   s3Config?: S3Config;
   /** When true, do not initialise S3 / transcode queue. Used by tests. */
   skipStorage?: boolean;
+  /**
+   * When true, seed the first admin user if `users` is empty (idempotent).
+   * Off by default so tests never create users implicitly; the real
+   * entrypoint (`index.ts`) opts in.
+   */
+  bootstrapAdmin?: boolean;
 }
 
 export async function createServer(opts: CreateServerOptions = {}): Promise<FastifyInstance> {
@@ -156,6 +163,10 @@ export async function createServer(opts: CreateServerOptions = {}): Promise<Fast
         .then((n) => n > 0 && app.log.info({ recovered: n }, 'transcode: recovered orphans'))
         .catch((err) => app.log.error({ err }, 'transcode: orphan recovery failed'));
     });
+  }
+
+  if (opts.bootstrapAdmin) {
+    await bootstrapFirstAdmin(db, app.log);
   }
 
   return app;

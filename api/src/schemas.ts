@@ -28,6 +28,11 @@ export const RefreshRequestSchema = z.object({
   refreshToken: z.string().min(1),
 });
 
+export const ChangePasswordRequestSchema = z.object({
+  currentPassword: z.string().min(1).max(256),
+  newPassword: z.string().min(12).max(256),
+});
+
 export const UserSchema = z.object({
   id: z.string().uuid(),
   email: z.string().email(),
