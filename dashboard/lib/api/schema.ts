@@ -21,6 +21,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/ready": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Readiness probe with per-dependency checks.
+         * @description Liveness (`/v1/health`) only proves the process answered. Readiness
+         *     also checks that every downstream the API actually depends on (the
+         *     database, object storage) is reachable. Orchestrators should use
+         *     this endpoint to decide whether the instance should receive traffic.
+         */
+        get: operations["getReadiness"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/device/register": {
         parameters: {
             query?: never;
@@ -97,7 +120,13 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Create a new user account. */
+        /**
+         * Create a new user account.
+         * @description Registration is not public: it requires a valid user access token. On a
+         *     fresh install the backend seeds the first account at boot (see
+         *     `BOOTSTRAP_ADMIN_*`), and that account creates any further users from
+         *     the dashboard. There are no roles — every user may create others.
+         */
         post: operations["registerUser"];
         delete?: never;
         options?: never;
@@ -154,6 +183,29 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/v1/users/me/password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Change the authenticated user's password.
+         * @description Verifies `currentPassword`, then sets `newPassword`. All of the user's
+         *     refresh tokens are revoked (logging out every other session) and a fresh
+         *     access/refresh pair is issued for the caller, so the current session
+         *     survives the change.
+         */
+        patch: operations["changePassword"];
         trace?: never;
     };
     "/v1/devices": {
@@ -327,8 +379,83 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/firmware/latest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get the latest firmware manifest for a hardware revision.
+         * @description Returns the manifest of the most recent firmware release published for
+         *     the given hardware revision. Devices call this on boot and after each
+         *     successful sync to know whether to upgrade. The `url` is a short-lived
+         *     presigned GET URL pointing at the signed firmware binary; the device
+         *     must verify `sha256` (integrity) and `signature` (authenticity) before
+         *     flashing. The signature is over the raw binary bytes using Ed25519;
+         *     the public key is baked into the running firmware image.
+         */
+        get: operations["getLatestFirmware"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
-export type webhooks = Record<string, never>;
+export interface webhooks {
+    deviceOnline: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * A device transitioned to online.
+         * @description Fired when the backend receives traffic from a device after at least
+         *     5 minutes of silence — i.e. the device just came back online from a
+         *     deep-sleep or network outage. The webhook is **not** fired on every
+         *     heartbeat; only on edge transitions offline → online.
+         *
+         *     See [Webhook delivery](#section/Webhook-delivery) in the description
+         *     for signature verification and retry semantics.
+         */
+        post: operations["deviceOnlineWebhook"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    audioFinalized: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Audio transcoding completed.
+         * @description Fired when an audio item transitions out of `processing` — either to
+         *     `ready` (transcode succeeded) or `failed` (transcode errored out).
+         *     Use `data.audio.state` to disambiguate.
+         */
+        post: operations["audioFinalizedWebhook"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+}
 export interface components {
     schemas: {
         Health: {
@@ -338,6 +465,25 @@ export interface components {
             version: string;
             /** @description Git commit short SHA. */
             commit?: string;
+        };
+        Ready: {
+            /**
+             * @description Aggregate readiness. `degraded` whenever any check is not `ok`.
+             * @enum {string}
+             */
+            status: "ok" | "degraded";
+            /** @description Per-dependency check results, keyed by check name (`database`, `objectStorage`, …). */
+            checks: {
+                [key: string]: components["schemas"]["ReadyCheck"];
+            };
+        };
+        ReadyCheck: {
+            /** @enum {string} */
+            status: "ok" | "error" | "timeout";
+            /** @description Round-trip latency of the probe. Present on success. */
+            latencyMs?: number;
+            /** @description Short failure description. Present when `status` is not `ok`. */
+            error?: string;
         };
         Error: {
             /**
@@ -376,6 +522,12 @@ export interface components {
             email: string;
             /** Format: password */
             password: string;
+        };
+        ChangePasswordRequest: {
+            /** Format: password */
+            currentPassword: string;
+            /** Format: password */
+            newPassword: string;
         };
         User: {
             /** Format: uuid */
@@ -444,7 +596,16 @@ export interface components {
         DeviceEventsRequest: {
             events: components["schemas"]["DeviceEvent"][];
         };
-        DeviceEvent: {
+        /**
+         * @description A single event emitted by the firmware. The wire shape is a
+         *     discriminated union keyed by `type`; consumers should pattern-match on
+         *     it (codegen libraries surface this as a sum type / tagged enum).
+         *
+         *     `eventId` is a client-generated UUID used for idempotency; the backend
+         *     deduplicates on `(deviceId, eventId)`.
+         */
+        DeviceEvent: components["schemas"]["DeviceEventCardScanned"] | components["schemas"]["DeviceEventCardUnknown"] | components["schemas"]["DeviceEventPlaybackStarted"] | components["schemas"]["DeviceEventPlaybackFinished"] | components["schemas"]["DeviceEventButtonPressed"] | components["schemas"]["DeviceEventVolumeChanged"] | components["schemas"]["DeviceEventLowBattery"] | components["schemas"]["DeviceEventWifiSignal"] | components["schemas"]["DeviceEventError"];
+        DeviceEventBase: {
             /**
              * Format: uuid
              * @description Client-generated UUID; used for idempotency.
@@ -452,12 +613,152 @@ export interface components {
             eventId: string;
             /** Format: date-time */
             ts: string;
-            /** @enum {string} */
-            type: "card_scanned" | "card_unknown" | "playback_started" | "playback_finished" | "button_pressed" | "low_battery" | "error";
-            /** @description Free-form per-event data. Shapes will be tightened in phase 2. */
-            payload?: {
-                [key: string]: unknown;
+            type: string;
+        };
+        DeviceEventCardScanned: components["schemas"]["DeviceEventBase"] & {
+            /** @constant */
+            type: "card_scanned";
+            payload: {
+                /** @description RFID UID, lowercase hex, no separators. */
+                uid: string;
             };
+        } & {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "card_scanned";
+        };
+        DeviceEventCardUnknown: components["schemas"]["DeviceEventBase"] & {
+            /** @constant */
+            type: "card_unknown";
+            payload: {
+                uid: string;
+            };
+        } & {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "card_unknown";
+        };
+        DeviceEventPlaybackStarted: components["schemas"]["DeviceEventBase"] & {
+            /** @constant */
+            type: "playback_started";
+            payload: {
+                /** Format: uuid */
+                audioId: string;
+            };
+        } & {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "playback_started";
+        };
+        DeviceEventPlaybackFinished: components["schemas"]["DeviceEventBase"] & {
+            /** @constant */
+            type: "playback_finished";
+            payload: {
+                /** Format: uuid */
+                audioId: string;
+                /**
+                 * @description `completed` — playback reached the end.
+                 *     `interrupted` — a new card was scanned mid-playback, or the user pressed pause.
+                 *     `error` — the decoder failed; a paired `error` event follows.
+                 * @enum {string}
+                 */
+                reason: "completed" | "interrupted" | "error";
+                /** @description Position at which playback ended. Useful when `reason` is `interrupted`. */
+                positionMs?: number;
+            };
+        } & {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "playback_finished";
+        };
+        DeviceEventButtonPressed: components["schemas"]["DeviceEventBase"] & {
+            /** @constant */
+            type: "button_pressed";
+            payload: {
+                /**
+                 * @description Which physical control fired the event.
+                 * @enum {string}
+                 */
+                button: "reset" | "pairing" | "encoder";
+                /** @description How long the button was held. Omitted for momentary taps. */
+                durationMs?: number;
+            };
+        } & {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "button_pressed";
+        };
+        DeviceEventVolumeChanged: components["schemas"]["DeviceEventBase"] & {
+            /** @constant */
+            type: "volume_changed";
+            payload: {
+                /** @description Volume level after the change. */
+                volume: number;
+            };
+        } & {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "volume_changed";
+        };
+        DeviceEventLowBattery: components["schemas"]["DeviceEventBase"] & {
+            /** @constant */
+            type: "low_battery";
+            payload: {
+                batteryPercent: number;
+                /** @description Pack voltage in millivolts. Optional, useful for debugging. */
+                voltageMv?: number;
+            };
+        } & {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "low_battery";
+        };
+        DeviceEventWifiSignal: components["schemas"]["DeviceEventBase"] & {
+            /** @constant */
+            type: "wifi_signal";
+            payload: {
+                /** @description RSSI in dBm. Closer to 0 is better. */
+                rssi: number;
+                /** @description SSID the device is currently associated with. */
+                ssid?: string;
+            };
+        } & {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "wifi_signal";
+        };
+        DeviceEventError: components["schemas"]["DeviceEventBase"] & {
+            /** @constant */
+            type: "error";
+            payload: {
+                /** @description Short, snake_case error tag (e.g. `audio_not_in_sync`, `decoder_failed`). */
+                reason: string;
+                details?: {
+                    [key: string]: unknown;
+                };
+            };
+        } & {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "error";
         };
         Audio: {
             /** Format: uuid */
@@ -536,6 +837,83 @@ export interface components {
         CardBindingList: {
             items: components["schemas"]["CardBinding"][];
         };
+        FirmwareManifest: {
+            /**
+             * @description SemVer of the firmware release.
+             * @example 0.2.0
+             * @example 1.0.0
+             */
+            version: string;
+            /** @description Hardware revision this build targets. */
+            hwRev: string;
+            /**
+             * Format: uri
+             * @description Presigned GET URL for the signed firmware binary.
+             */
+            url: string;
+            /**
+             * Format: date-time
+             * @description When the presigned URL stops being valid.
+             */
+            expiresAt: string;
+            /** @description Lowercase hex SHA-256 of the binary. */
+            sha256: string;
+            /**
+             * @description Lowercase hex Ed25519 signature of the binary, computed offline by
+             *     the maintainer with the firmware-signing private key. The matching
+             *     public key is baked into the running firmware image.
+             */
+            signature: string;
+            /** @enum {string} */
+            signatureAlgorithm: "ed25519";
+            sizeBytes: number;
+            /** Format: date-time */
+            releasedAt: string;
+            /** @description Optional human-readable release notes. */
+            notes?: string;
+        };
+        WebhookEnvelopeBase: {
+            /**
+             * Format: uuid
+             * @description Logical event id. Distinct from `Hush-Webhook-Id`: the header
+             *     changes on every retry, while this one stays stable so consumers
+             *     can deduplicate cross-retry.
+             */
+            id: string;
+            /** @description Event type. Always mirrors the `Hush-Webhook-Type` header. */
+            type: string;
+            /**
+             * Format: date-time
+             * @description When the event happened on the server (UTC, with `Z` suffix).
+             */
+            occurredAt: string;
+        };
+        WebhookEnvelopeDeviceOnline: components["schemas"]["WebhookEnvelopeBase"] & {
+            /** @constant */
+            type: "device.online";
+            data: components["schemas"]["WebhookDeviceOnlineData"];
+        };
+        WebhookDeviceOnlineData: {
+            device: components["schemas"]["Device"];
+            /**
+             * @description How long the device was silent before this transition. Always at
+             *     least 300 (5 minutes — the threshold that defines "back online").
+             */
+            previouslyOfflineSec: number;
+        };
+        WebhookEnvelopeAudioFinalized: components["schemas"]["WebhookEnvelopeBase"] & {
+            /** @constant */
+            type: "audio.finalized";
+            data: components["schemas"]["WebhookAudioFinalizedData"];
+        };
+        WebhookAudioFinalizedData: {
+            audio: components["schemas"]["Audio"];
+            /**
+             * @description Short error tag, present iff `audio.state == failed`. Examples:
+             *     `transcode_failed`, `unsupported_codec`, `source_missing`.
+             */
+            failureReason?: string;
+        };
     };
     responses: {
         /** @description Missing or invalid authentication. */
@@ -565,15 +943,70 @@ export interface components {
                 "application/json": components["schemas"]["Error"];
             };
         };
+        /**
+         * @description The client has exceeded the rate limit for this route. The response
+         *     always carries a `Retry-After` header (seconds) and the standard
+         *     `X-RateLimit-*` triplet so clients can self-throttle.
+         */
+        TooManyRequests: {
+            headers: {
+                "Retry-After": components["headers"]["RetryAfter"];
+                "X-RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                "X-RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                "X-RateLimit-Reset": components["headers"]["RateLimitReset"];
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
     };
     parameters: {
         /** @description Opaque pagination cursor returned by a previous response. */
         Cursor: string;
         /** @description Device identifier (UUID). */
         DeviceId: string;
+        /**
+         * @description HMAC-SHA256 signature of `<t>.<raw-body>` using the per-user webhook
+         *     secret. Format `t=<unix-seconds>,v1=<lowercase-hex>`. Consumers must
+         *     reject `|now-t| > 300s` and use a constant-time compare.
+         */
+        WebhookSignatureHeader: string;
+        /**
+         * @description UUID v4 unique to this delivery attempt. Use it for idempotent
+         *     processing; the same id may arrive more than once on retry.
+         */
+        WebhookIdHeader: string;
+        /** @description The event type. Always equal to the `type` field of the body. */
+        WebhookTypeHeader: "device.online" | "audio.finalized";
     };
     requestBodies: never;
-    headers: never;
+    headers: {
+        /**
+         * @description Maximum number of requests the client may issue inside the current
+         *     rate-limit window. Constant within a window.
+         * @example 60
+         */
+        RateLimitLimit: number;
+        /**
+         * @description Requests still allowed in the current window. Decreases on each accepted
+         *     request; resets to `X-RateLimit-Limit` when the window rolls over.
+         * @example 42
+         */
+        RateLimitRemaining: number;
+        /**
+         * @description Unix timestamp (seconds since epoch, UTC) at which the current window
+         *     rolls over and the quota resets.
+         * @example 1748892900
+         */
+        RateLimitReset: number;
+        /**
+         * @description Seconds the client should wait before retrying. Always present on
+         *     `429 Too Many Requests`.
+         * @example 30
+         */
+        RetryAfter: number;
+    };
     pathItems: never;
 }
 export type $defs = Record<string, never>;
@@ -607,6 +1040,35 @@ export interface operations {
             };
         };
     };
+    getReadiness: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Every dependency is healthy. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Ready"];
+                };
+            };
+            /** @description At least one dependency is unhealthy. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Ready"];
+                };
+            };
+        };
+    };
     registerDevice: {
         parameters: {
             query?: never;
@@ -631,6 +1093,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
         };
     };
     syncDevice: {
@@ -686,6 +1149,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
         };
     };
     registerUser: {
@@ -701,15 +1165,20 @@ export interface operations {
             };
         };
         responses: {
-            /** @description User created. */
+            /**
+             * @description User created. Returns the new user's profile — not tokens: the
+             *     caller stays authenticated as themselves. The new user signs in via
+             *     `/v1/users/login` with the password set here.
+             */
             201: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["AuthTokens"];
+                    "application/json": components["schemas"]["User"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
             /** @description Email already in use. */
             409: {
                 headers: {
@@ -720,6 +1189,7 @@ export interface operations {
                 };
             };
             422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
         };
     };
     loginUser: {
@@ -745,6 +1215,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            429: components["responses"]["TooManyRequests"];
         };
     };
     refreshTokens: {
@@ -770,6 +1241,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            429: components["responses"]["TooManyRequests"];
         };
     };
     getMe: {
@@ -791,6 +1263,41 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+        };
+    };
+    changePassword: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChangePasswordRequest"];
+            };
+        };
+        responses: {
+            /** @description Password changed; a fresh token pair is issued. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthTokens"];
+                };
+            };
+            /** @description Missing token or `currentPassword` did not match. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
         };
     };
     listDevices: {
@@ -878,6 +1385,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["TooManyRequests"];
         };
     };
     listDeviceCards: {
@@ -932,6 +1440,8 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
         };
     };
     unbindCard: {
@@ -1007,6 +1517,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
         };
     };
     getAudio: {
@@ -1063,6 +1574,129 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Error"];
                 };
+            };
+        };
+    };
+    getLatestFirmware: {
+        parameters: {
+            query: {
+                /** @description Hardware revision (e.g. `r0`, `r1`). */
+                hw_rev: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Latest manifest for the given hardware revision. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FirmwareManifest"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description No firmware published for this hardware revision. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            429: components["responses"]["TooManyRequests"];
+        };
+    };
+    deviceOnlineWebhook: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description HMAC-SHA256 signature of `<t>.<raw-body>` using the per-user webhook
+                 *     secret. Format `t=<unix-seconds>,v1=<lowercase-hex>`. Consumers must
+                 *     reject `|now-t| > 300s` and use a constant-time compare.
+                 */
+                "Hush-Webhook-Signature": components["parameters"]["WebhookSignatureHeader"];
+                /**
+                 * @description UUID v4 unique to this delivery attempt. Use it for idempotent
+                 *     processing; the same id may arrive more than once on retry.
+                 */
+                "Hush-Webhook-Id": components["parameters"]["WebhookIdHeader"];
+                /** @description The event type. Always equal to the `type` field of the body. */
+                "Hush-Webhook-Type": components["parameters"]["WebhookTypeHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebhookEnvelopeDeviceOnline"];
+            };
+        };
+        responses: {
+            /**
+             * @description The consumer no longer wants this webhook. The backend will
+             *     disable the subscription and stop retrying.
+             */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Any 2xx status acknowledges receipt. The body is ignored. */
+            "2XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    audioFinalizedWebhook: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description HMAC-SHA256 signature of `<t>.<raw-body>` using the per-user webhook
+                 *     secret. Format `t=<unix-seconds>,v1=<lowercase-hex>`. Consumers must
+                 *     reject `|now-t| > 300s` and use a constant-time compare.
+                 */
+                "Hush-Webhook-Signature": components["parameters"]["WebhookSignatureHeader"];
+                /**
+                 * @description UUID v4 unique to this delivery attempt. Use it for idempotent
+                 *     processing; the same id may arrive more than once on retry.
+                 */
+                "Hush-Webhook-Id": components["parameters"]["WebhookIdHeader"];
+                /** @description The event type. Always equal to the `type` field of the body. */
+                "Hush-Webhook-Type": components["parameters"]["WebhookTypeHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebhookEnvelopeAudioFinalized"];
+            };
+        };
+        responses: {
+            /** @description Subscription is gone; stop retrying. */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Acknowledged. */
+            "2XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

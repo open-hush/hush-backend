@@ -1,6 +1,6 @@
 import { createServer } from './server.js';
 
-const server = await createServer();
+const server = await createServer({ bootstrapAdmin: true });
 
 const host = process.env.HUSH_HOST ?? '0.0.0.0';
 const port = Number(process.env.HUSH_PORT ?? 8080);

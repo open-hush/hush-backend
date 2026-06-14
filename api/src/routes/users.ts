@@ -6,6 +6,7 @@ import type { FastifyReply } from 'fastify';
 
 import {
   AuthTokensSchema,
+  ChangePasswordRequestSchema,
   ErrorSchema,
   RefreshRequestSchema,
   UserLoginRequestSchema,
@@ -58,12 +59,16 @@ export const usersRoutes = (deps: UsersDeps): FastifyPluginAsyncZod => async (ap
     return { accessToken, refreshToken, expiresIn: accessTtlSeconds() };
   }
 
+  // Registration is authenticated: an existing user creates another. It does
+  // NOT log the caller in as the new user (no tokens, no cookie) — it returns
+  // the created profile and the caller stays themselves.
   app.post(
     '/users/register',
     {
+      preHandler: app.requireUser,
       schema: {
         body: UserRegisterRequestSchema,
-        response: { 201: AuthTokensSchema, 409: ErrorSchema },
+        response: { 201: UserSchema, 401: ErrorSchema, 409: ErrorSchema },
       },
     },
     async (req, reply) => {
@@ -75,19 +80,22 @@ export const usersRoutes = (deps: UsersDeps): FastifyPluginAsyncZod => async (ap
         .where('email', '=', email)
         .executeTakeFirst();
       if (existing) {
-        return reply.code(409).send({ code: 'email_in_use', message: 'email already in use' });
+        return reply.code(409).send({ code: 'email_taken', message: 'email already in use' });
       }
 
       const password_hash = await hashPassword(password);
       const inserted = await db
         .insertInto('users')
         .values({ email, password_hash, display_name: displayName ?? null })
-        .returning(['id'])
+        .returning(['id', 'email', 'display_name', 'created_at'])
         .executeTakeFirstOrThrow();
 
-      const tokens = await issueTokens(inserted.id);
-      setRefreshCookie(reply, tokens.refreshToken, refreshTtlSeconds());
-      return reply.code(201).send(tokens);
+      return reply.code(201).send({
+        id: inserted.id,
+        email: inserted.email,
+        displayName: inserted.display_name,
+        createdAt: ISO(inserted.created_at),
+      });
     },
   );
 
@@ -206,6 +214,55 @@ export const usersRoutes = (deps: UsersDeps): FastifyPluginAsyncZod => async (ap
         displayName: row.display_name,
         createdAt: ISO(row.created_at),
       });
+    },
+  );
+
+  app.patch(
+    '/users/me/password',
+    {
+      preHandler: app.requireUser,
+      schema: {
+        body: ChangePasswordRequestSchema,
+        response: { 200: AuthTokensSchema, 401: ErrorSchema },
+      },
+    },
+    async (req, reply) => {
+      const userId = req.user.sub;
+      const { currentPassword, newPassword } = req.body;
+
+      const row = await db
+        .selectFrom('users')
+        .select(['password_hash'])
+        .where('id', '=', userId)
+        .executeTakeFirst();
+
+      const ok = row ? await verifyPassword(row.password_hash, currentPassword) : false;
+      if (!row || !ok) {
+        return reply
+          .code(401)
+          .send({ code: 'invalid_credentials', message: 'current password is incorrect' });
+      }
+
+      const password_hash = await hashPassword(newPassword);
+      await db
+        .updateTable('users')
+        .set({ password_hash, updated_at: new Date() })
+        .where('id', '=', userId)
+        .execute();
+
+      // Revoke every outstanding refresh token: changing the password logs out
+      // all other sessions. The caller gets a fresh pair below so its session
+      // survives.
+      await db
+        .updateTable('refresh_tokens')
+        .set({ revoked_at: new Date() })
+        .where('user_id', '=', userId)
+        .where('revoked_at', 'is', null)
+        .execute();
+
+      const tokens = await issueTokens(userId);
+      setRefreshCookie(reply, tokens.refreshToken, refreshTtlSeconds());
+      return reply.code(200).send(tokens);
     },
   );
 };
