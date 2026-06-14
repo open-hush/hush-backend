@@ -27,14 +27,16 @@ You need:
 ### 1. Start the data plane
 
 ```bash
-cp .env.example .env       # tweak if you want; defaults work
-docker compose up -d       # Postgres (5432) + MinIO (9000 + 9001 console)
+make services              # Postgres (5432) + MinIO (9000 + 9001 console)
 ```
+
+`make services` wraps `docker compose up -d`. Stop it with `make services-down`, tail logs with `make services-logs`.
 
 ### 2. Run the API
 
 ```bash
 cd api
+cp .env.example .env       # tweak if you want; defaults work
 pnpm install
 pnpm run dev
 # → listening on http://localhost:8080
@@ -46,6 +48,7 @@ curl http://localhost:8080/v1/health
 
 ```bash
 cd dashboard
+cp .env.example .env.local # tweak if you want; defaults work
 pnpm install
 pnpm run dev
 # → http://localhost:3000
@@ -62,6 +65,7 @@ hush-backend/
 ├── api/                  Node.js + Fastify API (pnpm, no workspace)
 │   ├── package.json
 │   ├── tsconfig.json
+│   ├── .env.example      # API env template (DB, JWT, S3, HMAC…)
 │   └── src/
 │       ├── index.ts      # entrypoint
 │       ├── server.ts     # Fastify app wiring
@@ -72,9 +76,10 @@ hush-backend/
 │       └── transcode/    # ffmpeg invocation
 ├── migrations/           # Postgres SQL migrations
 ├── dashboard/            # Next.js 15 (App Router) + TypeScript + Tailwind (pnpm, no workspace)
+│   └── .env.example      # dashboard env template (NEXT_PUBLIC_API_URL)
 ├── docker-compose.yml    # local Postgres + MinIO
 ├── Dockerfile            # production image for the API
-├── .env.example
+├── Makefile              # task runner (make services, make api-dev, …)
 └── PLAN.md / CLAUDE.md / README.md
 ```
 

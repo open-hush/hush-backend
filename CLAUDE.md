@@ -9,6 +9,14 @@ Both projects use **pnpm** and run on **Node 24** (pinned in each `.nvmrc`). The
 
 ---
 
+## Dependency versions — exact, always
+
+Every dependency in any `package.json` (both `api/` and `dashboard/`) **must be pinned to an exact version**. No range operators ever: no `^`, no `~`, no `>=`, no `*`, no `x` wildcards. `"fastify": "5.2.1"`, never `"fastify": "^5.2.1"`.
+
+This is enforced mechanically by `save-exact=true` in each subproject's `.npmrc`, so `pnpm add` / `npm install` write exact versions by default. If you ever hand-edit a `package.json`, keep it exact. Reviewing a diff that introduces a range operator is a bug — flag it.
+
+---
+
 ## OpenAPI source of truth — non-negotiable
 
 `hush-protocol/hush-api.yaml` is **the** contract. Request/response shapes are derived from it; hand-rolled `interface`s for endpoint payloads in `api/src/` or `dashboard/lib/api/` are a bug.
@@ -76,7 +84,7 @@ Bring up the data plane first:
 
 ```bash
 # From hush-backend/
-docker compose up -d   # Postgres + MinIO
+make services   # Postgres + MinIO (wraps `docker compose up -d`)
 ```
 
 ---
