@@ -121,11 +121,19 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Create a new user account.
-         * @description Registration is not public: it requires a valid user access token. On a
-         *     fresh install the backend seeds the first account at boot (see
-         *     `BOOTSTRAP_ADMIN_*`), and that account creates any further users from
-         *     the dashboard. There are no roles — every user may create others.
+         * Register a new end-user account.
+         * @description Public self-registration for end users. Anyone may create an account
+         *     and is logged straight in: the response carries the same access/refresh
+         *     token pair as `/v1/users/login` (the refresh token is also set as an
+         *     `httpOnly` cookie).
+         *
+         *     The new account always has the non-privileged `user` role — the role is
+         *     never read from the request and self-registration can never create an
+         *     `admin`. Admin accounts are seeded at boot only (see `BOOTSTRAP_ADMIN_*`).
+         *
+         *     Operators who want an invite-only deployment set
+         *     `DISABLE_PUBLIC_REGISTRATION=true`, which makes this endpoint return
+         *     `403 registration_disabled`.
          */
         post: operations["registerUser"];
         delete?: never;
@@ -535,6 +543,13 @@ export interface components {
             /** Format: email */
             email: string;
             displayName?: string;
+            /**
+             * @description Authorization role. `user` is an ordinary end-user scoped to their
+             *     own resources; `admin` has global privileges. Self-registration
+             *     always yields `user`.
+             * @enum {string}
+             */
+            role: "admin" | "user";
             /** Format: date-time */
             createdAt: string;
         };
@@ -1166,19 +1181,26 @@ export interface operations {
         };
         responses: {
             /**
-             * @description User created. Returns the new user's profile — not tokens: the
-             *     caller stays authenticated as themselves. The new user signs in via
-             *     `/v1/users/login` with the password set here.
+             * @description Account created and signed in. Returns an access/refresh token pair;
+             *     the refresh token is also set as an `httpOnly` cookie.
              */
             201: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["User"];
+                    "application/json": components["schemas"]["AuthTokens"];
                 };
             };
-            401: components["responses"]["Unauthorized"];
+            /** @description Public registration is disabled on this deployment. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /** @description Email already in use. */
             409: {
                 headers: {

@@ -33,10 +33,13 @@ export const ChangePasswordRequestSchema = z.object({
   newPassword: z.string().min(12).max(256),
 });
 
+export const UserRoleSchema = z.enum(['admin', 'user']);
+
 export const UserSchema = z.object({
   id: z.string().uuid(),
   email: z.string().email(),
   displayName: z.string().nullish(),
+  role: UserRoleSchema,
   createdAt: z.string().datetime(),
 });
 
