@@ -4,6 +4,11 @@
   "private": true,
   "description": "Hush dashboard (Next.js 15 + TypeScript + Tailwind).",
   "license": "MIT",
+  "packageManager": "pnpm@10.33.0",
+  "engines": {
+    "node": "^24",
+    "pnpm": ">=10"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -33,7 +38,7 @@
     "zustand": "^5.0.0"
   },
   "devDependencies": {
-    "@types/node": "^22.7.0",
+    "@types/node": "^24.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "autoprefixer": "^10.4.20",
@@ -43,5 +48,11 @@
     "postcss": "^8.4.47",
     "tailwindcss": "^3.4.14",
     "typescript": "^5.6.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "sharp",
+      "unrs-resolver"
+    ]
   }
 }

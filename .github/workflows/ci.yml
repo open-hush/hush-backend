@@ -38,7 +38,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           cache: pnpm
           cache-dependency-path: api/pnpm-lock.yaml
 
@@ -69,20 +69,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
-          cache: npm
-          cache-dependency-path: dashboard/package-lock.json
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: dashboard/pnpm-lock.yaml
 
       - name: install
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
       - name: typecheck
-        run: npm run typecheck
+        run: pnpm run typecheck
 
       - name: lint
-        run: npm run lint
+        run: pnpm run lint
 
       - name: build
-        run: npm run build
+        run: pnpm run build

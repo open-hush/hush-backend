@@ -19,8 +19,8 @@ This monorepo holds **two** projects that ship together:
 
 You need:
 
-- **Node** 22+ (`fnm install 22` or `nvm install 22`)
-- **pnpm** 10+ (`corepack enable && corepack prepare pnpm@10 --activate`)
+- **Node** 24 (`fnm use` / `nvm use` — version pinned in `.nvmrc`)
+- **pnpm** 10+ (`corepack enable && corepack prepare pnpm@10 --activate`) — used by **both** projects
 - **Docker** and **docker compose** (Postgres + MinIO)
 - **ffmpeg** (transcoding; only needed when running the worker — `brew install ffmpeg` or `apt install ffmpeg`)
 
@@ -46,8 +46,8 @@ curl http://localhost:8080/v1/health
 
 ```bash
 cd dashboard
-npm install
-npm run dev
+pnpm install
+pnpm run dev
 # → http://localhost:3000
 ```
 
@@ -59,7 +59,7 @@ Migrations: tooling is still an open decision (see [`PLAN.md`](./PLAN.md)). SQL 
 
 ```
 hush-backend/
-├── api/                  Node.js + Fastify API (pnpm)
+├── api/                  Node.js + Fastify API (pnpm, no workspace)
 │   ├── package.json
 │   ├── tsconfig.json
 │   └── src/
@@ -71,7 +71,7 @@ hush-backend/
 │       ├── storage/      # S3 presigned URLs
 │       └── transcode/    # ffmpeg invocation
 ├── migrations/           # Postgres SQL migrations
-├── dashboard/            # Next.js 15 (App Router) + TypeScript + Tailwind (npm)
+├── dashboard/            # Next.js 15 (App Router) + TypeScript + Tailwind (pnpm, no workspace)
 ├── docker-compose.yml    # local Postgres + MinIO
 ├── Dockerfile            # production image for the API
 ├── .env.example
@@ -86,7 +86,7 @@ The API contract is defined in **[`hush-protocol/hush-api.yaml`](https://github.
 
 ```bash
 # In dashboard/
-npm run gen:api    # reads ../../hush-protocol/hush-api.yaml → lib/api/
+pnpm run gen:api   # reads ../../hush-protocol/hush-api.yaml → lib/api/
 ```
 
 Drift between the spec and either consumer is a release blocker.
