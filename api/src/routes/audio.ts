@@ -12,7 +12,7 @@ import {
   ErrorSchema,
 } from '../schemas.js';
 import type { AudiosTable, Database } from '../db/types.js';
-import { headObject, presignPut, type S3Config } from '../storage/s3.js';
+import { deleteObject, headObject, presignPut, type S3Config } from '../storage/s3.js';
 import type { TranscodeQueue } from '../transcode/queue.js';
 import { decodeCursor, encodeCursor } from '../util/cursor.js';
 import type { Selectable } from 'kysely';
@@ -224,6 +224,50 @@ export const audioRoutes = (deps: AudioDeps): FastifyPluginAsyncZod => async (ap
         .executeTakeFirst();
       if (!row) return reply.code(404).send({ code: 'not_found', message: 'audio not found' });
       return reply.code(200).send(toApi(row));
+    },
+  );
+
+  app.delete(
+    '/audio/:id',
+    {
+      preHandler: app.requireUser,
+      schema: {
+        params: z.object({ id: z.string().uuid() }),
+        response: { 204: z.null(), 401: ErrorSchema, 404: ErrorSchema },
+      },
+    },
+    async (req, reply) => {
+      const userId = req.user.sub;
+
+      const row = await db
+        .selectFrom('audios')
+        .select(['id', 'source_key', 'transcoded_key'])
+        .where('id', '=', req.params.id)
+        .where('owner_id', '=', userId)
+        .executeTakeFirst();
+      if (!row) return reply.code(404).send({ code: 'not_found', message: 'audio not found' });
+
+      // Drop the row first; the FK from card_bindings cascades, so any card
+      // pointing at this audio is unbound atomically.
+      await db
+        .deleteFrom('audios')
+        .where('id', '=', row.id)
+        .where('owner_id', '=', userId)
+        .execute();
+
+      // Best-effort object cleanup. The DB is the source of truth for what the
+      // user owns, so a storage hiccup must not leave a deleted-but-listable
+      // audio; orphaned objects are cheaper than a broken delete.
+      for (const key of [row.source_key, row.transcoded_key]) {
+        if (!key || key === 'pending') continue;
+        try {
+          await deleteObject(s3, s3Config, key);
+        } catch (err) {
+          req.log.warn({ err, key, audioId: row.id }, 'audio delete: object cleanup failed');
+        }
+      }
+
+      return reply.code(204).send(null);
     },
   );
 };
