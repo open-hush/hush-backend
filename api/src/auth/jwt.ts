@@ -2,8 +2,11 @@ import fp from 'fastify-plugin';
 import jwt, { type FastifyJWTOptions } from '@fastify/jwt';
 import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 
+import type { UserRole } from '../db/types.js';
+
 export interface JwtUser {
   sub: string;
+  role: UserRole;
   iat: number;
   exp: number;
   jti: string;
@@ -12,6 +15,7 @@ export interface JwtUser {
 declare module 'fastify' {
   interface FastifyInstance {
     requireUser: (req: FastifyRequest) => Promise<void>;
+    requireAdmin: (req: FastifyRequest) => Promise<void>;
   }
   interface FastifyRequest {
     user: JwtUser;
@@ -20,7 +24,7 @@ declare module 'fastify' {
 
 declare module '@fastify/jwt' {
   interface FastifyJWT {
-    payload: { sub: string; jti: string };
+    payload: { sub: string; role: UserRole; jti: string };
     user: JwtUser;
   }
 }
@@ -44,6 +48,21 @@ const plugin: FastifyPluginAsync = async (app) => {
       await req.jwtVerify();
     } catch {
       throw app.httpErrors.unauthorized('invalid or missing token');
+    }
+  });
+
+  // Admin-only gate. Verifies the token first (so a missing/invalid token is a
+  // 401, not a 403), then enforces the role claim. Self-registered users carry
+  // role 'user' and can never reach an admin route, which is the boundary that
+  // keeps public onboarding from escalating into global admin access.
+  app.decorate('requireAdmin', async (req: FastifyRequest) => {
+    try {
+      await req.jwtVerify();
+    } catch {
+      throw app.httpErrors.unauthorized('invalid or missing token');
+    }
+    if (req.user.role !== 'admin') {
+      throw app.httpErrors.forbidden('admin privileges required');
     }
   });
 };

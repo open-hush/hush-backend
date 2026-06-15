@@ -13,7 +13,7 @@ import {
   UserRegisterRequestSchema,
   UserSchema,
 } from '../schemas.js';
-import type { Database } from '../db/types.js';
+import type { Database, UserRole } from '../db/types.js';
 import { hashPassword, verifyPassword } from '../auth/password.js';
 import { accessTtlSeconds } from '../auth/jwt.js';
 import { generateRefreshToken, hashRefresh, refreshTtlSeconds } from '../auth/refresh.js';
@@ -44,9 +44,12 @@ interface UsersDeps {
 export const usersRoutes = (deps: UsersDeps): FastifyPluginAsyncZod => async (app) => {
   const { db } = deps;
 
-  async function issueTokens(userId: string): Promise<{ accessToken: string; refreshToken: string; expiresIn: number }> {
+  async function issueTokens(
+    userId: string,
+    role: UserRole,
+  ): Promise<{ accessToken: string; refreshToken: string; expiresIn: number }> {
     const jti = randomUUID();
-    const accessToken = app.jwt.sign({ sub: userId, jti });
+    const accessToken = app.jwt.sign({ sub: userId, role, jti });
 
     const refreshToken = generateRefreshToken();
     const tokenHash = hashRefresh(refreshToken);
@@ -59,19 +62,32 @@ export const usersRoutes = (deps: UsersDeps): FastifyPluginAsyncZod => async (ap
     return { accessToken, refreshToken, expiresIn: accessTtlSeconds() };
   }
 
-  // Registration is authenticated: an existing user creates another. It does
-  // NOT log the caller in as the new user (no tokens, no cookie) — it returns
-  // the created profile and the caller stays themselves.
+  // Public self-registration for end customers (OPE-18). Anyone can create an
+  // account and is logged straight in (tokens + refresh cookie). The role is
+  // hard-coded to 'user' and never read from the body: self-registration can
+  // never mint an admin, which is the boundary against privilege escalation.
+  // Admins are created only by the bootstrap seed.
+  //
+  // Operators who want the locked-down, invite-only posture set
+  // DISABLE_PUBLIC_REGISTRATION=true and create accounts out of band.
+  const publicRegistrationDisabled =
+    (process.env.DISABLE_PUBLIC_REGISTRATION ?? '').toLowerCase() === 'true';
+
   app.post(
     '/users/register',
     {
-      preHandler: app.requireUser,
       schema: {
         body: UserRegisterRequestSchema,
-        response: { 201: UserSchema, 401: ErrorSchema, 409: ErrorSchema },
+        response: { 201: AuthTokensSchema, 403: ErrorSchema, 409: ErrorSchema },
       },
     },
     async (req, reply) => {
+      if (publicRegistrationDisabled) {
+        return reply
+          .code(403)
+          .send({ code: 'registration_disabled', message: 'public registration is disabled' });
+      }
+
       const { email, password, displayName } = req.body;
 
       const existing = await db
@@ -86,16 +102,13 @@ export const usersRoutes = (deps: UsersDeps): FastifyPluginAsyncZod => async (ap
       const password_hash = await hashPassword(password);
       const inserted = await db
         .insertInto('users')
-        .values({ email, password_hash, display_name: displayName ?? null })
-        .returning(['id', 'email', 'display_name', 'created_at'])
+        .values({ email, password_hash, display_name: displayName ?? null, role: 'user' })
+        .returning(['id', 'role'])
         .executeTakeFirstOrThrow();
 
-      return reply.code(201).send({
-        id: inserted.id,
-        email: inserted.email,
-        displayName: inserted.display_name,
-        createdAt: ISO(inserted.created_at),
-      });
+      const tokens = await issueTokens(inserted.id, inserted.role);
+      setRefreshCookie(reply, tokens.refreshToken, refreshTtlSeconds());
+      return reply.code(201).send(tokens);
     },
   );
 
@@ -111,7 +124,7 @@ export const usersRoutes = (deps: UsersDeps): FastifyPluginAsyncZod => async (ap
       const { email, password } = req.body;
       const row = await db
         .selectFrom('users')
-        .select(['id', 'password_hash'])
+        .select(['id', 'password_hash', 'role'])
         .where('email', '=', email)
         .executeTakeFirst();
 
@@ -120,7 +133,7 @@ export const usersRoutes = (deps: UsersDeps): FastifyPluginAsyncZod => async (ap
         return reply.code(401).send({ code: 'invalid_credentials', message: 'invalid credentials' });
       }
 
-      const tokens = await issueTokens(row.id);
+      const tokens = await issueTokens(row.id, row.role);
       setRefreshCookie(reply, tokens.refreshToken, refreshTtlSeconds());
       return reply.code(200).send(tokens);
     },
@@ -149,7 +162,15 @@ export const usersRoutes = (deps: UsersDeps): FastifyPluginAsyncZod => async (ap
 
       const row = await db
         .selectFrom('refresh_tokens')
-        .select(['id', 'user_id', 'used_at', 'revoked_at', 'expires_at'])
+        .innerJoin('users', 'users.id', 'refresh_tokens.user_id')
+        .select([
+          'refresh_tokens.id as id',
+          'refresh_tokens.user_id as user_id',
+          'refresh_tokens.used_at as used_at',
+          'refresh_tokens.revoked_at as revoked_at',
+          'refresh_tokens.expires_at as expires_at',
+          'users.role as role',
+        ])
         .where('token_hash', '=', tokenHash)
         .executeTakeFirst();
 
@@ -184,7 +205,7 @@ export const usersRoutes = (deps: UsersDeps): FastifyPluginAsyncZod => async (ap
         .where('id', '=', row.id)
         .execute();
 
-      const tokens = await issueTokens(row.user_id);
+      const tokens = await issueTokens(row.user_id, row.role);
       setRefreshCookie(reply, tokens.refreshToken, refreshTtlSeconds());
       return reply.code(200).send(tokens);
     },
@@ -200,7 +221,7 @@ export const usersRoutes = (deps: UsersDeps): FastifyPluginAsyncZod => async (ap
       const userId = req.user.sub;
       const row = await db
         .selectFrom('users')
-        .select(['id', 'email', 'display_name', 'created_at'])
+        .select(['id', 'email', 'display_name', 'role', 'created_at'])
         .where('id', '=', userId)
         .executeTakeFirst();
 
@@ -212,6 +233,7 @@ export const usersRoutes = (deps: UsersDeps): FastifyPluginAsyncZod => async (ap
         id: row.id,
         email: row.email,
         displayName: row.display_name,
+        role: row.role,
         createdAt: ISO(row.created_at),
       });
     },
@@ -232,7 +254,7 @@ export const usersRoutes = (deps: UsersDeps): FastifyPluginAsyncZod => async (ap
 
       const row = await db
         .selectFrom('users')
-        .select(['password_hash'])
+        .select(['password_hash', 'role'])
         .where('id', '=', userId)
         .executeTakeFirst();
 
@@ -260,7 +282,7 @@ export const usersRoutes = (deps: UsersDeps): FastifyPluginAsyncZod => async (ap
         .where('revoked_at', 'is', null)
         .execute();
 
-      const tokens = await issueTokens(userId);
+      const tokens = await issueTokens(userId, row.role);
       setRefreshCookie(reply, tokens.refreshToken, refreshTtlSeconds());
       return reply.code(200).send(tokens);
     },

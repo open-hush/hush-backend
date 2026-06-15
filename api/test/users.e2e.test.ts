@@ -21,30 +21,35 @@ let db: Kysely<Database>;
 let pool: pg.Pool;
 
 async function login(email: string, password: string) {
-  const res = await app.inject({
-    method: 'POST',
-    url: '/v1/users/login',
-    payload: { email, password },
+  return app.inject({ method: 'POST', url: '/v1/users/login', payload: { email, password } });
+}
+
+async function me(accessToken: string) {
+  return app.inject({
+    method: 'GET',
+    url: '/v1/users/me',
+    headers: { authorization: `Bearer ${accessToken}` },
   });
-  return res;
 }
 
 beforeAll(async () => {
   process.env.JWT_SIGNING_KEY = 'x'.repeat(32);
   process.env.METRICS_ENABLED = 'false';
+  delete process.env.DISABLE_PUBLIC_REGISTRATION;
   const databaseUrl = process.env.DATABASE_URL ?? 'postgres://hush:hush@localhost:5432/hush';
   pool = createPool(databaseUrl);
   db = createDb(pool);
   app = await createServer({ db, skipStorage: true });
 
-  // Seed an existing user so we can obtain a token: registration is no longer
-  // public, so without a seeded account there is no way in.
+  // Seed an admin account directly so we can assert the admin role flows
+  // through login → token → /me without relying on the bootstrap seed.
   await db
     .insertInto('users')
     .values({
       email: adminEmail,
       password_hash: await hashPassword(adminPassword),
       display_name: 'E2E admin',
+      role: 'admin',
     })
     .execute();
 });
@@ -57,49 +62,93 @@ afterAll(async () => {
   await pool.end();
 });
 
-describe('closed registration', () => {
-  it('rejects register without a bearer token (401)', async () => {
+describe('public self-registration', () => {
+  it('creates a non-admin user, logs them in, and exposes role=user on /me', async () => {
+    const email = `${TAG}-signup@test.local`;
     const res = await app.inject({
       method: 'POST',
       url: '/v1/users/register',
-      payload: { email: `${TAG}-nope@test.local`, password: 'whatever-long-enough' },
-    });
-    expect(res.statusCode).toBe(401);
-  });
-
-  it('creates a user when authenticated and returns the profile, not tokens', async () => {
-    const auth = await login(adminEmail, adminPassword);
-    expect(auth.statusCode).toBe(200);
-    const { accessToken } = auth.json();
-
-    const newEmail = `${TAG}-created@test.local`;
-    const res = await app.inject({
-      method: 'POST',
-      url: '/v1/users/register',
-      headers: { authorization: `Bearer ${accessToken}` },
-      payload: { email: newEmail, password: 'created-user-password', displayName: 'Created' },
+      payload: { email, password: 'a-perfectly-long-password', displayName: 'New customer' },
     });
 
     expect(res.statusCode).toBe(201);
-    const body = res.json();
-    expect(body.email).toBe(newEmail);
-    expect(body.id).toBeTruthy();
-    // Must NOT log the caller in as the new user.
-    expect(body.accessToken).toBeUndefined();
-    expect(body.refreshToken).toBeUndefined();
+    const tokens = res.json();
+    expect(tokens.accessToken).toBeTruthy();
+    expect(tokens.refreshToken).toBeTruthy();
+    expect(tokens.expiresIn).toBeGreaterThan(0);
+
+    // The session works and the new account is a plain user — never an admin.
+    const profile = await me(tokens.accessToken);
+    expect(profile.statusCode).toBe(200);
+    expect(profile.json().email).toBe(email);
+    expect(profile.json().role).toBe('user');
+
+    // The same credentials log in afterwards.
+    expect((await login(email, 'a-perfectly-long-password')).statusCode).toBe(200);
   });
 
-  it('returns 409 when the email is already in use', async () => {
-    const auth = await login(adminEmail, adminPassword);
-    const { accessToken } = auth.json();
+  it('cannot escalate to admin even if a role is supplied in the body', async () => {
+    const email = `${TAG}-sneaky@test.local`;
     const res = await app.inject({
       method: 'POST',
       url: '/v1/users/register',
-      headers: { authorization: `Bearer ${accessToken}` },
+      // `role` is not part of the schema; it must be ignored, not honoured.
+      payload: { email, password: 'a-perfectly-long-password', role: 'admin' },
+    });
+    expect(res.statusCode).toBe(201);
+    const profile = await me(res.json().accessToken);
+    expect(profile.json().role).toBe('user');
+  });
+
+  it('returns 409 when the email is already in use', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/users/register',
       payload: { email: adminEmail, password: 'another-long-password' },
     });
     expect(res.statusCode).toBe(409);
     expect(res.json().code).toBe('email_taken');
+  });
+
+  it('returns 422 when the password is too short', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/users/register',
+      payload: { email: `${TAG}-weak@test.local`, password: 'short' },
+    });
+    expect(res.statusCode).toBe(422);
+    expect(res.json().code).toBe('validation_failed');
+  });
+
+  it('admin accounts keep role=admin through login → /me', async () => {
+    const auth = await login(adminEmail, adminPassword);
+    expect(auth.statusCode).toBe(200);
+    const profile = await me(auth.json().accessToken);
+    expect(profile.json().role).toBe('admin');
+  });
+});
+
+describe('public self-registration disabled', () => {
+  let lockedApp: FastifyInstance;
+
+  beforeAll(async () => {
+    process.env.DISABLE_PUBLIC_REGISTRATION = 'true';
+    lockedApp = await createServer({ db, skipStorage: true });
+  });
+
+  afterAll(async () => {
+    await lockedApp.close();
+    delete process.env.DISABLE_PUBLIC_REGISTRATION;
+  });
+
+  it('returns 403 registration_disabled', async () => {
+    const res = await lockedApp.inject({
+      method: 'POST',
+      url: '/v1/users/register',
+      payload: { email: `${TAG}-locked@test.local`, password: 'a-perfectly-long-password' },
+    });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().code).toBe('registration_disabled');
   });
 });
 

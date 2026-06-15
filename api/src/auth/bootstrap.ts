@@ -64,7 +64,7 @@ export async function bootstrapFirstAdmin(
 
   await db
     .insertInto('users')
-    .values({ email, password_hash, display_name: 'Hush admin' })
+    .values({ email, password_hash, display_name: 'Hush admin', role: 'admin' })
     .execute();
 
   if (supplied) {

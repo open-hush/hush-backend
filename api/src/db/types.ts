@@ -1,10 +1,13 @@
 import type { Generated } from 'kysely';
 
+export type UserRole = 'admin' | 'user';
+
 export interface UsersTable {
   id: Generated<string>;
   email: string;
   password_hash: string;
   display_name: string | null;
+  role: Generated<UserRole>;
   created_at: Generated<Date>;
   updated_at: Generated<Date>;
 }
