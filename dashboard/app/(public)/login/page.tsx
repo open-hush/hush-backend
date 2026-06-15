@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -81,12 +80,6 @@ export default function LoginPage() {
           <Button type="submit" className="w-full" disabled={isSubmitting}>
             {isSubmitting ? "Signing in…" : "Sign in"}
           </Button>
-          <p className="text-center text-sm text-muted-foreground">
-            No account?{" "}
-            <Link href="/register" className="underline">
-              Create one
-            </Link>
-          </p>
         </form>
       </CardContent>
     </Card>

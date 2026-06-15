@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
-import { CassetteTape, LayoutDashboard, LogOut, Speaker } from "lucide-react";
+import { CassetteTape, LayoutDashboard, LogOut, Speaker, UserPlus } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -13,6 +13,7 @@ import { useAuthStore } from "@/lib/auth/store";
 const NAV = [
   { href: "/devices", label: "Devices", icon: Speaker },
   { href: "/audio", label: "Audio library", icon: CassetteTape },
+  { href: "/users/new", label: "Add user", icon: UserPlus },
 ];
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
