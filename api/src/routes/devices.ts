@@ -10,6 +10,7 @@ import {
   DeviceListQuerySchema,
   DeviceListSchema,
   DeviceSchema,
+  DeviceUpdateRequestSchema,
   ErrorSchema,
 } from '../schemas.js';
 import type { Database } from '../db/types.js';
@@ -70,6 +71,7 @@ export const devicesRoutes = (deps: DevicesDeps): FastifyPluginAsyncZod => async
           'firmware_version', 'last_seen_at', 'created_at',
         ])
         .where('owner_id', '=', userId)
+        .where('state', '!=', 'retired')
         .orderBy('created_at', 'desc')
         .orderBy('id', 'desc')
         .limit(DEVICES_PAGE_SIZE + 1);
@@ -119,9 +121,88 @@ export const devicesRoutes = (deps: DevicesDeps): FastifyPluginAsyncZod => async
         ])
         .where('id', '=', req.params.id)
         .where('owner_id', '=', userId)
+        .where('state', '!=', 'retired')
         .executeTakeFirst();
       if (!row) return reply.code(404).send({ code: 'not_found', message: 'device not found' });
       return reply.code(200).send(deviceToApi(row));
+    },
+  );
+
+  app.patch(
+    '/devices/:id',
+    {
+      preHandler: app.requireUser,
+      schema: {
+        params: PARAM_DEVICE_ID,
+        body: DeviceUpdateRequestSchema,
+        response: { 200: DeviceSchema, 401: ErrorSchema, 404: ErrorSchema, 422: ErrorSchema },
+      },
+    },
+    async (req, reply) => {
+      const userId = req.user.sub;
+      const columns = [
+        'id', 'serial', 'owner_id', 'name', 'state',
+        'firmware_version', 'last_seen_at', 'created_at',
+      ] as const;
+
+      // Only `name` is mutable. A device owned by someone else, or already
+      // retired, is treated as not found — no `403`, no existence leak.
+      if (!('name' in req.body)) {
+        const row = await db
+          .selectFrom('devices')
+          .select(columns)
+          .where('id', '=', req.params.id)
+          .where('owner_id', '=', userId)
+          .where('state', '!=', 'retired')
+          .executeTakeFirst();
+        if (!row) return reply.code(404).send({ code: 'not_found', message: 'device not found' });
+        return reply.code(200).send(deviceToApi(row));
+      }
+
+      const updated = await db
+        .updateTable('devices')
+        .set({ name: req.body.name ?? null, updated_at: new Date() })
+        .where('id', '=', req.params.id)
+        .where('owner_id', '=', userId)
+        .where('state', '!=', 'retired')
+        .returning(columns)
+        .executeTakeFirst();
+      if (!updated) return reply.code(404).send({ code: 'not_found', message: 'device not found' });
+      return reply.code(200).send(deviceToApi(updated));
+    },
+  );
+
+  app.delete(
+    '/devices/:id',
+    {
+      preHandler: app.requireUser,
+      schema: {
+        params: PARAM_DEVICE_ID,
+        response: { 204: z.null(), 401: ErrorSchema, 404: ErrorSchema },
+      },
+    },
+    async (req, reply) => {
+      const userId = req.user.sub;
+
+      // Soft-delete = retire. Ownership and the device secret survive so the
+      // unit can be re-claimed/recovered; a retired device stops syncing
+      // (the device sync route rejects any non-claimed state) and drops out
+      // of the owner's list. Scoped to the owner: anything else is a 404.
+      const retired = await db
+        .updateTable('devices')
+        .set({
+          state: 'retired',
+          claim_code: null,
+          claim_code_expires_at: null,
+          updated_at: new Date(),
+        })
+        .where('id', '=', req.params.id)
+        .where('owner_id', '=', userId)
+        .where('state', '!=', 'retired')
+        .returning(['id'])
+        .executeTakeFirst();
+      if (!retired) return reply.code(404).send({ code: 'not_found', message: 'device not found' });
+      return reply.code(204).send(null);
     },
   );
 

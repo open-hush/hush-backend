@@ -11,6 +11,7 @@ export type CardBindingRequest = components["schemas"]["CardBindingRequest"];
 export type Device = components["schemas"]["Device"];
 export type DeviceClaimRequest = components["schemas"]["DeviceClaimRequest"];
 export type DeviceList = components["schemas"]["DeviceList"];
+export type DeviceUpdateRequest = components["schemas"]["DeviceUpdateRequest"];
 export type ApiError = components["schemas"]["Error"];
 export type User = components["schemas"]["User"];
 export type UserLoginRequest = components["schemas"]["UserLoginRequest"];
