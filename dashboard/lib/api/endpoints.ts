@@ -49,4 +49,6 @@ export const audioApi = {
     apiFetch<AudioCreateResponse>("/v1/audio", { method: "POST", body }),
   finalize: (id: string) =>
     apiFetch<Audio>(`/v1/audio/${id}/finalize`, { method: "POST" }),
+  remove: (id: string) =>
+    apiFetch<void>(`/v1/audio/${id}`, { method: "DELETE" }),
 };

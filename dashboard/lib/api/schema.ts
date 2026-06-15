@@ -356,7 +356,14 @@ export interface paths {
         get: operations["getAudio"];
         put?: never;
         post?: never;
-        delete?: never;
+        /**
+         * Delete an audio item.
+         * @description Permanently removes the audio metadata and its stored objects (the raw
+         *     upload and the transcoded MP3). Any card bindings that reference this
+         *     audio are removed as well (cascade). Only the owner may delete their
+         *     own audio; deleting another user's audio returns `404`.
+         */
+        delete: operations["deleteAudio"];
         options?: never;
         head?: never;
         patch?: never;
@@ -1561,6 +1568,28 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Audio"];
                 };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    deleteAudio: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Audio deleted. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];

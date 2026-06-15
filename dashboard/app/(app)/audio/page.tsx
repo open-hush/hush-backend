@@ -5,13 +5,21 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Upload } from "lucide-react";
+import { Trash2, Upload } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 import { audioApi } from "@/lib/api/endpoints";
 import type { Audio } from "@/lib/api/types";
@@ -51,6 +59,7 @@ export default function AudioPage() {
   const [file, setFile] = useState<File | null>(null);
   const [progress, setProgress] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Audio | null>(null);
 
   const list = useQuery({
     queryKey: ["audio"],
@@ -109,6 +118,19 @@ export default function AudioPage() {
     },
   });
 
+  const remove = useMutation({
+    mutationFn: (id: string) => audioApi.remove(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["audio"] });
+      setDeleteTarget(null);
+    },
+    onError: (err) => {
+      const msg = err instanceof HttpError && err.body?.message ? err.body.message : err instanceof Error ? err.message : "Delete failed";
+      setError(msg);
+      setDeleteTarget(null);
+    },
+  });
+
   return (
     <div className="mx-auto max-w-4xl space-y-6">
       <div>
@@ -160,7 +182,7 @@ export default function AudioPage() {
         )}
         {list.data?.items.map((a) => (
           <Card key={a.id}>
-            <CardContent className="flex items-center justify-between p-4">
+            <CardContent className="flex items-center justify-between gap-4 p-4">
               <div className="min-w-0 space-y-1">
                 <div className="flex items-center gap-2">
                   <p className="truncate font-medium">{a.title}</p>
@@ -175,10 +197,44 @@ export default function AudioPage() {
                   </p>
                 )}
               </div>
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label={`Delete ${a.title}`}
+                className="shrink-0 text-muted-foreground hover:text-destructive"
+                onClick={() => setDeleteTarget(a)}
+              >
+                <Trash2 className="h-4 w-4" />
+              </Button>
             </CardContent>
           </Card>
         ))}
       </div>
+
+      <Dialog open={deleteTarget !== null} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete audio</DialogTitle>
+            <DialogDescription>
+              {deleteTarget
+                ? `“${deleteTarget.title}” will be permanently deleted, along with any card bindings that point to it. This cannot be undone.`
+                : null}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteTarget(null)} disabled={remove.isPending}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => deleteTarget && remove.mutate(deleteTarget.id)}
+              disabled={remove.isPending}
+            >
+              {remove.isPending ? "Deleting…" : "Delete"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
