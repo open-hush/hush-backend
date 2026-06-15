@@ -246,10 +246,26 @@ export interface paths {
         get: operations["getDevice"];
         put?: never;
         post?: never;
-        delete?: never;
+        /**
+         * Retire (remove) a device owned by the authenticated user.
+         * @description Soft-deletes the device: it transitions to `retired`, stops syncing
+         *     and disappears from the owner's device list. Ownership is preserved so
+         *     the action can be reversed by support — the hardware identity and its
+         *     secret survive, the unit is never destroyed. Scoped to the caller: a
+         *     device owned by another user (or already retired) responds `404`.
+         */
+        delete: operations["retireDevice"];
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * Update a device owned by the authenticated user.
+         * @description Renames a claimed device. Only the user-chosen `name` is mutable; the
+         *     serial, state and firmware version are owned by the device lifecycle
+         *     and cannot be changed here. Scoped to the caller: a device owned by
+         *     another user (or already retired) responds `404`, never `403`, so the
+         *     endpoint does not leak which device ids exist.
+         */
+        patch: operations["updateDevice"];
         trace?: never;
     };
     "/v1/devices/{id}/claim": {
@@ -597,6 +613,14 @@ export interface components {
         DeviceClaimRequest: {
             claimCode: string;
             name?: string;
+        };
+        /**
+         * @description Mutable device fields. Only the user-chosen name can be changed;
+         *     serial, state and firmware are managed by the device lifecycle.
+         */
+        DeviceUpdateRequest: {
+            /** @description New device name. Send null to clear it. */
+            name?: string | null;
         };
         DeviceSyncResponse: {
             /** Format: date-time */
@@ -1376,6 +1400,59 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
+        };
+    };
+    retireDevice: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Device identifier (UUID). */
+                id: components["parameters"]["DeviceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Device retired. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    updateDevice: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Device identifier (UUID). */
+                id: components["parameters"]["DeviceId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeviceUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Updated device. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Device"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["Unprocessable"];
         };
     };
     claimDevice: {

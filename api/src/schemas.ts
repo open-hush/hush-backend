@@ -156,6 +156,14 @@ export const DeviceClaimRequestSchema = z.object({
   name: z.string().min(1).max(120).optional(),
 });
 
+// Only the user-chosen name is mutable; serial, state and firmware are owned
+// by the device lifecycle. `null` clears the name.
+export const DeviceUpdateRequestSchema = z
+  .object({
+    name: z.string().max(120).nullable().optional(),
+  })
+  .strict();
+
 export const DeviceConfigSchema = z.object({
   lightSleepAfterSec: z.number().int().min(5),
   deepSleepAfterSec: z.number().int().min(60),

@@ -13,6 +13,7 @@ import type {
   Device,
   DeviceClaimRequest,
   DeviceList,
+  DeviceUpdateRequest,
   User,
   UserLoginRequest,
   UserRegisterRequest,
@@ -34,6 +35,10 @@ export const devicesApi = {
   get: (id: string) => apiFetch<Device>(`/v1/devices/${id}`),
   claim: (id: string, body: DeviceClaimRequest) =>
     apiFetch<Device>(`/v1/devices/${id}/claim`, { method: "POST", body }),
+  update: (id: string, body: DeviceUpdateRequest) =>
+    apiFetch<Device>(`/v1/devices/${id}`, { method: "PATCH", body }),
+  // Retire (soft-delete): the device leaves the user's list and stops syncing.
+  remove: (id: string) => apiFetch<void>(`/v1/devices/${id}`, { method: "DELETE" }),
   listCards: (id: string) => apiFetch<CardBindingList>(`/v1/devices/${id}/cards`),
   bindCard: (id: string, body: CardBindingRequest) =>
     apiFetch<CardBinding>(`/v1/devices/${id}/cards`, { method: "POST", body }),
