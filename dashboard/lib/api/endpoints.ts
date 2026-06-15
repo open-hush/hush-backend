@@ -19,8 +19,10 @@ import type {
 } from "./types";
 
 export const authApi = {
+  // Authenticated: an existing user creates another. Returns the new user's
+  // profile (no tokens) and the caller stays signed in as themselves.
   register: (body: UserRegisterRequest) =>
-    apiFetch<AuthTokens>("/v1/users/register", { method: "POST", body, skipAuth: true }),
+    apiFetch<User>("/v1/users/register", { method: "POST", body }),
   login: (body: UserLoginRequest) =>
     apiFetch<AuthTokens>("/v1/users/login", { method: "POST", body, skipAuth: true }),
   me: () => apiFetch<User>("/v1/users/me"),
