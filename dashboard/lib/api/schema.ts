@@ -121,19 +121,18 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Register a new end-user account.
-         * @description Public self-registration for end users. Anyone may create an account
-         *     and is logged straight in: the response carries the same access/refresh
-         *     token pair as `/v1/users/login` (the refresh token is also set as an
-         *     `httpOnly` cookie).
+         * Create a new end-user account (admin only).
+         * @description Admin-only account creation. The caller must present a valid `admin`
+         *     bearer token; the new account is **not** logged in and no tokens are
+         *     issued — the response is the created user's profile. The caller's own
+         *     session is unaffected.
+         *
+         *     There is no public self-registration. An unauthenticated request gets
+         *     `401`; an authenticated non-admin gets `403`.
          *
          *     The new account always has the non-privileged `user` role — the role is
-         *     never read from the request and self-registration can never create an
-         *     `admin`. Admin accounts are seeded at boot only (see `BOOTSTRAP_ADMIN_*`).
-         *
-         *     Operators who want an invite-only deployment set
-         *     `DISABLE_PUBLIC_REGISTRATION=true`, which makes this endpoint return
-         *     `403 registration_disabled`.
+         *     never read from the request, so this endpoint can never mint an `admin`.
+         *     Admin accounts are seeded at boot only (see `BOOTSTRAP_ADMIN_*`).
          */
         post: operations["registerUser"];
         delete?: never;
@@ -1181,18 +1180,19 @@ export interface operations {
         };
         responses: {
             /**
-             * @description Account created and signed in. Returns an access/refresh token pair;
-             *     the refresh token is also set as an `httpOnly` cookie.
+             * @description Account created. Returns the new user's profile; no tokens are
+             *     issued and the new account is not logged in.
              */
             201: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["AuthTokens"];
+                    "application/json": components["schemas"]["User"];
                 };
             };
-            /** @description Public registration is disabled on this deployment. */
+            401: components["responses"]["Unauthorized"];
+            /** @description The caller is authenticated but is not an admin. */
             403: {
                 headers: {
                     [name: string]: unknown;
