@@ -14,5 +14,6 @@ export type DeviceList = components["schemas"]["DeviceList"];
 export type DeviceUpdateRequest = components["schemas"]["DeviceUpdateRequest"];
 export type ApiError = components["schemas"]["Error"];
 export type User = components["schemas"]["User"];
+export type UserList = components["schemas"]["UserList"];
 export type UserLoginRequest = components["schemas"]["UserLoginRequest"];
 export type UserRegisterRequest = components["schemas"]["UserRegisterRequest"];

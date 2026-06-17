@@ -15,6 +15,7 @@ import type {
   DeviceList,
   DeviceUpdateRequest,
   User,
+  UserList,
   UserLoginRequest,
   UserRegisterRequest,
 } from "./types";
@@ -27,6 +28,13 @@ export const authApi = {
   login: (body: UserLoginRequest) =>
     apiFetch<AuthTokens>("/v1/users/login", { method: "POST", body, skipAuth: true }),
   me: () => apiFetch<User>("/v1/users/me"),
+};
+
+// Admin-only user management (OPE-27). The API enforces the admin gate; the
+// dashboard merely hides these from non-admins as a convenience.
+export const usersApi = {
+  list: (cursor?: string) =>
+    apiFetch<UserList>(`/v1/users${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`),
 };
 
 export const devicesApi = {

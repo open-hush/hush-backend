@@ -111,6 +111,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/users": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List user accounts (admin only).
+         * @description Admin-only directory of every account. The caller must present a valid
+         *     `admin` bearer token; an unauthenticated request gets `401` and an
+         *     authenticated non-admin gets `403`.
+         *
+         *     Results are ordered newest-first and paginated by opaque cursor: pass
+         *     the previous response's `nextCursor` back as the `cursor` query param to
+         *     fetch the next page. A response without `nextCursor` is the last page.
+         */
+        get: operations["listUsers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/users/register": {
         parameters: {
             query?: never;
@@ -130,9 +156,10 @@ export interface paths {
          *     There is no public self-registration. An unauthenticated request gets
          *     `401`; an authenticated non-admin gets `403`.
          *
-         *     The new account always has the non-privileged `user` role — the role is
-         *     never read from the request, so this endpoint can never mint an `admin`.
-         *     Admin accounts are seeded at boot only (see `BOOTSTRAP_ADMIN_*`).
+         *     The optional `role` field lets an admin choose the new account's role
+         *     (`admin` or `user`). When omitted it defaults to `user`. This is the
+         *     only path to mint an `admin` from the dashboard; the bootstrap seed
+         *     (`BOOTSTRAP_ADMIN_*`) remains for first-boot provisioning.
          */
         post: operations["registerUser"];
         delete?: never;
@@ -546,6 +573,14 @@ export interface components {
             /** Format: password */
             password: string;
             displayName?: string;
+            /**
+             * @description Role for the new account. Optional; defaults to `user` when omitted.
+             *     Only an admin caller can reach this endpoint, so this is the path to
+             *     create another `admin` from the dashboard.
+             * @default user
+             * @enum {string}
+             */
+            role: "admin" | "user";
         };
         UserLoginRequest: {
             /** Format: email */
@@ -567,13 +602,17 @@ export interface components {
             displayName?: string;
             /**
              * @description Authorization role. `user` is an ordinary end-user scoped to their
-             *     own resources; `admin` has global privileges. Self-registration
-             *     always yields `user`.
+             *     own resources; `admin` has global privileges. New accounts default
+             *     to `user` unless an admin explicitly creates an `admin`.
              * @enum {string}
              */
             role: "admin" | "user";
             /** Format: date-time */
             createdAt: string;
+        };
+        UserList: {
+            items: components["schemas"]["User"][];
+            nextCursor?: string;
         };
         Device: {
             /** Format: uuid */
@@ -1195,6 +1234,39 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             422: components["responses"]["Unprocessable"];
             429: components["responses"]["TooManyRequests"];
+        };
+    };
+    listUsers: {
+        parameters: {
+            query?: {
+                /** @description Opaque pagination cursor returned by a previous response. */
+                cursor?: components["parameters"]["Cursor"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of user accounts. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description The caller is authenticated but is not an admin. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     registerUser: {

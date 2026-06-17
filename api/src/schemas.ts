@@ -13,10 +13,13 @@ export const AuthTokensSchema = z.object({
   expiresIn: z.number().int().positive(),
 });
 
+export const UserRoleSchema = z.enum(['admin', 'user']);
+
 export const UserRegisterRequestSchema = z.object({
   email: z.string().email().max(320),
   password: z.string().min(12).max(256),
   displayName: z.string().max(120).optional(),
+  role: UserRoleSchema.optional(),
 });
 
 export const UserLoginRequestSchema = z.object({
@@ -33,14 +36,21 @@ export const ChangePasswordRequestSchema = z.object({
   newPassword: z.string().min(12).max(256),
 });
 
-export const UserRoleSchema = z.enum(['admin', 'user']);
-
 export const UserSchema = z.object({
   id: z.string().uuid(),
   email: z.string().email(),
   displayName: z.string().nullish(),
   role: UserRoleSchema,
   createdAt: z.string().datetime(),
+});
+
+export const UserListQuerySchema = z.object({
+  cursor: z.string().optional(),
+});
+
+export const UserListSchema = z.object({
+  items: z.array(UserSchema),
+  nextCursor: z.string().optional(),
 });
 
 export const DeviceStateSchema = z.enum(['unclaimed', 'claimed', 'retired']);
