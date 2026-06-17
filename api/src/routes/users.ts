@@ -9,6 +9,8 @@ import {
   ChangePasswordRequestSchema,
   ErrorSchema,
   RefreshRequestSchema,
+  UserListQuerySchema,
+  UserListSchema,
   UserLoginRequestSchema,
   UserRegisterRequestSchema,
   UserSchema,
@@ -17,9 +19,12 @@ import type { Database, UserRole } from '../db/types.js';
 import { hashPassword, verifyPassword } from '../auth/password.js';
 import { accessTtlSeconds } from '../auth/jwt.js';
 import { generateRefreshToken, hashRefresh, refreshTtlSeconds } from '../auth/refresh.js';
+import { decodeCursor, encodeCursor } from '../util/cursor.js';
 
 const ISO = (d: Date | string): string =>
   (d instanceof Date ? d : new Date(d)).toISOString();
+
+const USERS_PAGE_SIZE = 50;
 
 const REFRESH_COOKIE = 'hush_refresh';
 
@@ -62,15 +67,70 @@ export const usersRoutes = (deps: UsersDeps): FastifyPluginAsyncZod => async (ap
     return { accessToken, refreshToken, expiresIn: accessTtlSeconds() };
   }
 
+  // Admin-only user directory (OPE-27). requireAdmin returns 401 for a
+  // missing/invalid token and 403 for an authenticated non-admin. Newest-first
+  // keyset pagination over (created_at, id), mirroring GET /v1/devices.
+  app.get(
+    '/users',
+    {
+      preHandler: app.requireAdmin,
+      schema: {
+        querystring: UserListQuerySchema,
+        response: { 200: UserListSchema, 401: ErrorSchema, 403: ErrorSchema },
+      },
+    },
+    async (req, reply) => {
+      const cursor = req.query.cursor ? decodeCursor(req.query.cursor) : null;
+
+      let q = db
+        .selectFrom('users')
+        .select(['id', 'email', 'display_name', 'role', 'created_at'])
+        .orderBy('created_at', 'desc')
+        .orderBy('id', 'desc')
+        .limit(USERS_PAGE_SIZE + 1);
+
+      if (cursor) {
+        const ts = new Date(cursor.createdAt);
+        q = q.where((eb) =>
+          eb.or([
+            eb('created_at', '<', ts),
+            eb.and([eb('created_at', '=', ts), eb('id', '<', cursor.id)]),
+          ]),
+        );
+      }
+
+      const rows = await q.execute();
+      const hasMore = rows.length > USERS_PAGE_SIZE;
+      const page = hasMore ? rows.slice(0, USERS_PAGE_SIZE) : rows;
+      const last = page[page.length - 1];
+      const nextCursor =
+        hasMore && last
+          ? encodeCursor({ createdAt: ISO(last.created_at), id: last.id })
+          : undefined;
+
+      return reply.code(200).send({
+        items: page.map((row) => ({
+          id: row.id,
+          email: row.email,
+          displayName: row.display_name,
+          role: row.role,
+          createdAt: ISO(row.created_at),
+        })),
+        ...(nextCursor ? { nextCursor } : {}),
+      });
+    },
+  );
+
   // Admin-only account creation (OPE-28, aligned with hush-protocol). The
   // caller must present a valid admin JWT: requireAdmin returns 401 for a
   // missing/invalid token and 403 for an authenticated non-admin. There is no
   // public self-registration — the spec is the single source of truth.
   //
   // The new account is NOT logged in and no tokens are issued: the response is
-  // the created user's profile. The role is hard-coded to 'user' and never
-  // read from the body, so this endpoint can never mint an admin. Admin
-  // accounts are seeded at boot only (BOOTSTRAP_ADMIN_*).
+  // the created user's profile. An admin may set the new account's `role`
+  // (OPE-27); when omitted it defaults to 'user'. This is the only way to mint
+  // an admin from the dashboard; the bootstrap seed (BOOTSTRAP_ADMIN_*) stays
+  // for first-boot provisioning.
   app.post(
     '/users/register',
     {
@@ -81,7 +141,7 @@ export const usersRoutes = (deps: UsersDeps): FastifyPluginAsyncZod => async (ap
       },
     },
     async (req, reply) => {
-      const { email, password, displayName } = req.body;
+      const { email, password, displayName, role } = req.body;
 
       const existing = await db
         .selectFrom('users')
@@ -95,7 +155,7 @@ export const usersRoutes = (deps: UsersDeps): FastifyPluginAsyncZod => async (ap
       const password_hash = await hashPassword(password);
       const inserted = await db
         .insertInto('users')
-        .values({ email, password_hash, display_name: displayName ?? null, role: 'user' })
+        .values({ email, password_hash, display_name: displayName ?? null, role: role ?? 'user' })
         .returning(['id', 'email', 'display_name', 'role', 'created_at'])
         .executeTakeFirstOrThrow();
 

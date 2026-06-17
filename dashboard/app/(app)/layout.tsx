@@ -3,18 +3,21 @@
 import { useEffect, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
-import { CassetteTape, LayoutDashboard, LogOut, Speaker, UserPlus } from "lucide-react";
+import { CassetteTape, LayoutDashboard, LogOut, Speaker, Users } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { authApi } from "@/lib/api/endpoints";
 import { useAuthStore } from "@/lib/auth/store";
 
-const NAV = [
+const BASE_NAV = [
   { href: "/devices", label: "Devices", icon: Speaker },
   { href: "/audio", label: "Audio library", icon: CassetteTape },
-  { href: "/users/new", label: "Add user", icon: UserPlus },
 ];
+
+// Admin-only entries. Hiding them in the sidebar is convenience, not access
+// control — the API enforces the admin gate on every /v1/users route.
+const ADMIN_NAV = [{ href: "/users", label: "Users", icon: Users }];
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -74,7 +77,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           </Link>
         </div>
         <nav className="flex-1 space-y-1 p-3">
-          {NAV.map((item) => {
+          {[...BASE_NAV, ...(user?.role === "admin" ? ADMIN_NAV : [])].map((item) => {
             const Icon = item.icon;
             const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
             return (

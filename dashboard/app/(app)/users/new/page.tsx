@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useForm } from "react-hook-form";
@@ -14,18 +14,21 @@ import { Label } from "@/components/ui/label";
 
 import { authApi } from "@/lib/api/endpoints";
 import { HttpError } from "@/lib/api/client";
+import { useAuthStore } from "@/lib/auth/store";
 import type { User } from "@/lib/api/types";
 
 const schema = z.object({
   email: z.string().email("invalid email"),
   password: z.string().min(12, "password must be at least 12 characters"),
   displayName: z.string().max(120).optional().or(z.literal("")),
+  role: z.enum(["admin", "user"]),
 });
 
 type FormValues = z.infer<typeof schema>;
 
 export default function NewUserPage() {
   const router = useRouter();
+  const { user: currentUser } = useAuthStore();
   const [serverError, setServerError] = useState<string | null>(null);
   const [created, setCreated] = useState<User | null>(null);
   const {
@@ -33,7 +36,14 @@ export default function NewUserPage() {
     handleSubmit,
     reset,
     formState: { errors, isSubmitting },
-  } = useForm<FormValues>({ resolver: zodResolver(schema) });
+  } = useForm<FormValues>({ resolver: zodResolver(schema), defaultValues: { role: "user" } });
+
+  // Admin-only route. The API enforces it (403); this guard just keeps a
+  // non-admin from seeing the form at all.
+  const isAdmin = currentUser?.role === "admin";
+  useEffect(() => {
+    if (currentUser && !isAdmin) router.replace("/devices");
+  }, [currentUser, isAdmin, router]);
 
   async function onSubmit(values: FormValues) {
     setServerError(null);
@@ -43,6 +53,7 @@ export default function NewUserPage() {
       const user = await authApi.register({
         email: values.email,
         password: values.password,
+        role: values.role,
         ...(values.displayName ? { displayName: values.displayName } : {}),
       });
       setCreated(user);
@@ -58,6 +69,8 @@ export default function NewUserPage() {
     }
   }
 
+  if (!isAdmin) return null;
+
   if (created) {
     return (
       <div className="mx-auto max-w-md">
@@ -71,11 +84,11 @@ export default function NewUserPage() {
           <CardContent className="space-y-3">
             <p className="rounded-md bg-muted px-3 py-2 text-sm">
               {created.displayName ? `${created.displayName} · ` : ""}
-              {created.email}
+              {created.email} · {created.role}
             </p>
             <div className="flex gap-2">
               <Button onClick={() => setCreated(null)}>Create another</Button>
-              <Button variant="ghost" onClick={() => router.push("/devices")}>
+              <Button variant="ghost" onClick={() => router.push("/users")}>
                 Done
               </Button>
             </div>
@@ -121,6 +134,21 @@ export default function NewUserPage() {
                 <p className="text-xs text-destructive">{errors.password.message}</p>
               )}
             </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="role">Role</Label>
+              <select
+                id="role"
+                className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                {...register("role")}
+              >
+                <option value="user">User</option>
+                <option value="admin">Admin</option>
+              </select>
+              <p className="text-xs text-muted-foreground">
+                Admins can manage users and see every account.
+              </p>
+              {errors.role && <p className="text-xs text-destructive">{errors.role.message}</p>}
+            </div>
             {serverError && (
               <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
                 {serverError}
@@ -131,7 +159,7 @@ export default function NewUserPage() {
                 {isSubmitting ? "Creating…" : "Create user"}
               </Button>
               <Button type="button" variant="ghost" asChild>
-                <Link href="/devices">Cancel</Link>
+                <Link href="/users">Cancel</Link>
               </Button>
             </div>
           </form>

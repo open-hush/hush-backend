@@ -117,15 +117,28 @@ describe('admin-only registration', () => {
     expect((await login(email, 'a-perfectly-long-password')).statusCode).toBe(200);
   });
 
-  it('never mints an admin even if a role is supplied in the body', async () => {
-    const email = `${TAG}-sneaky@test.local`;
+  it('defaults to role=user when no role is supplied', async () => {
+    const email = `${TAG}-defaultrole@test.local`;
     const res = await register(
-      // `role` is not part of the schema; it must be ignored, not honoured.
-      { email, password: 'a-perfectly-long-password', role: 'admin' },
+      { email, password: 'a-perfectly-long-password' },
       adminToken,
     );
     expect(res.statusCode).toBe(201);
     expect(res.json().role).toBe('user');
+  });
+
+  it('lets an admin mint another admin when role=admin is supplied (OPE-27)', async () => {
+    const email = `${TAG}-newadmin@test.local`;
+    const res = await register(
+      { email, password: 'a-perfectly-long-password', role: 'admin' },
+      adminToken,
+    );
+    expect(res.statusCode).toBe(201);
+    expect(res.json().role).toBe('admin');
+
+    // The freshly minted admin really has admin privileges end-to-end.
+    const newAdminToken = (await login(email, 'a-perfectly-long-password')).json().accessToken;
+    expect((await me(newAdminToken)).json().role).toBe('admin');
   });
 
   it('rejects an unauthenticated request with 401', async () => {
@@ -164,6 +177,84 @@ describe('admin-only registration', () => {
   it('admin accounts keep role=admin through login → /me', async () => {
     const profile = await me(adminToken);
     expect(profile.json().role).toBe('admin');
+  });
+});
+
+// GET /v1/users is admin-only (OPE-27): it requires an admin JWT and returns a
+// cursor-paginated directory of every account.
+describe('admin-only user listing', () => {
+  const listEmail = `${TAG}-listuser@test.local`;
+  const listPassword = 'list-user-correct-horse';
+  let adminToken: string;
+  let userToken: string;
+
+  const listUsers = (token?: string, cursor?: string) =>
+    app.inject({
+      method: 'GET',
+      url: `/v1/users${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ''}`,
+      ...(token ? { headers: { authorization: `Bearer ${token}` } } : {}),
+    });
+
+  beforeAll(async () => {
+    await db
+      .insertInto('users')
+      .values({
+        email: listEmail,
+        password_hash: await hashPassword(listPassword),
+        display_name: 'List user',
+        role: 'user',
+      })
+      .execute();
+    adminToken = (await login(adminEmail, adminPassword)).json().accessToken;
+    userToken = (await login(listEmail, listPassword)).json().accessToken;
+  });
+
+  it('rejects an unauthenticated request with 401', async () => {
+    const res = await listUsers();
+    expect(res.statusCode).toBe(401);
+    expect(res.json().code).toBe('unauthorized');
+  });
+
+  it('rejects an authenticated non-admin with 403', async () => {
+    const res = await listUsers(userToken);
+    expect(res.statusCode).toBe(403);
+    expect(res.json().code).toBe('forbidden');
+  });
+
+  it('returns the directory to an admin with the expected shape', async () => {
+    const res = await listUsers(adminToken);
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(Array.isArray(body.items)).toBe(true);
+
+    const seeded = body.items.find((u: { email: string }) => u.email === listEmail);
+    expect(seeded).toBeTruthy();
+    expect(seeded).toMatchObject({ email: listEmail, displayName: 'List user', role: 'user' });
+    expect(seeded.id).toBeTruthy();
+    expect(seeded.createdAt).toBeTruthy();
+    // Profiles only — never password hashes.
+    expect(seeded.passwordHash).toBeUndefined();
+    expect(seeded.password_hash).toBeUndefined();
+  });
+
+  it('paginates by cursor without overlapping items', async () => {
+    const first = await app.inject({
+      method: 'GET',
+      url: '/v1/users?cursor=', // empty cursor is ignored
+      headers: { authorization: `Bearer ${adminToken}` },
+    });
+    expect(first.statusCode).toBe(200);
+
+    const page = await listUsers(adminToken);
+    const body = page.json();
+    if (body.nextCursor) {
+      const next = await listUsers(adminToken, body.nextCursor);
+      expect(next.statusCode).toBe(200);
+      const firstIds = new Set(body.items.map((u: { id: string }) => u.id));
+      for (const u of next.json().items as { id: string }[]) {
+        expect(firstIds.has(u.id)).toBe(false);
+      }
+    }
   });
 });
 
