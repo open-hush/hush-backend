@@ -35,7 +35,6 @@ async function me(accessToken: string) {
 beforeAll(async () => {
   process.env.JWT_SIGNING_KEY = 'x'.repeat(32);
   process.env.METRICS_ENABLED = 'false';
-  delete process.env.DISABLE_PUBLIC_REGISTRATION;
   const databaseUrl = process.env.DATABASE_URL ?? 'postgres://hush:hush@localhost:5432/hush';
   pool = createPool(databaseUrl);
   db = createDb(pool);
@@ -62,93 +61,109 @@ afterAll(async () => {
   await pool.end();
 });
 
-describe('public self-registration', () => {
-  it('creates a non-admin user, logs them in, and exposes role=user on /me', async () => {
-    const email = `${TAG}-signup@test.local`;
-    const res = await app.inject({
+// POST /v1/users/register is admin-only (OPE-28, aligned with hush-protocol):
+// it requires an admin JWT, never logs the new account in, and returns the
+// created user's profile rather than tokens.
+describe('admin-only registration', () => {
+  const userEmail = `${TAG}-plainuser@test.local`;
+  const userPassword = 'plain-user-correct-horse';
+  let adminToken: string;
+  let userToken: string;
+
+  const register = (payload: unknown, token?: string) =>
+    app.inject({
       method: 'POST',
       url: '/v1/users/register',
-      payload: { email, password: 'a-perfectly-long-password', displayName: 'New customer' },
+      ...(token ? { headers: { authorization: `Bearer ${token}` } } : {}),
+      payload,
     });
 
+  beforeAll(async () => {
+    // Seed a plain (non-admin) user so we can assert the 403 path, then grab a
+    // token for each role via login.
+    await db
+      .insertInto('users')
+      .values({
+        email: userEmail,
+        password_hash: await hashPassword(userPassword),
+        display_name: 'Plain user',
+        role: 'user',
+      })
+      .execute();
+    adminToken = (await login(adminEmail, adminPassword)).json().accessToken;
+    userToken = (await login(userEmail, userPassword)).json().accessToken;
+  });
+
+  it('lets an admin create a non-admin user and returns the profile (no tokens)', async () => {
+    const email = `${TAG}-created@test.local`;
+    const res = await register(
+      { email, password: 'a-perfectly-long-password', displayName: 'New customer' },
+      adminToken,
+    );
+
     expect(res.statusCode).toBe(201);
-    const tokens = res.json();
-    expect(tokens.accessToken).toBeTruthy();
-    expect(tokens.refreshToken).toBeTruthy();
-    expect(tokens.expiresIn).toBeGreaterThan(0);
+    const body = res.json();
+    // The response is the created user's profile — NOT a token pair, and the
+    // new account is not logged in.
+    expect(body.accessToken).toBeUndefined();
+    expect(body.refreshToken).toBeUndefined();
+    expect(body.id).toBeTruthy();
+    expect(body.email).toBe(email);
+    expect(body.displayName).toBe('New customer');
+    expect(body.role).toBe('user');
+    expect(body.createdAt).toBeTruthy();
 
-    // The session works and the new account is a plain user — never an admin.
-    const profile = await me(tokens.accessToken);
-    expect(profile.statusCode).toBe(200);
-    expect(profile.json().email).toBe(email);
-    expect(profile.json().role).toBe('user');
-
-    // The same credentials log in afterwards.
+    // The created account can still log in afterwards with its own credentials.
     expect((await login(email, 'a-perfectly-long-password')).statusCode).toBe(200);
   });
 
-  it('cannot escalate to admin even if a role is supplied in the body', async () => {
+  it('never mints an admin even if a role is supplied in the body', async () => {
     const email = `${TAG}-sneaky@test.local`;
-    const res = await app.inject({
-      method: 'POST',
-      url: '/v1/users/register',
+    const res = await register(
       // `role` is not part of the schema; it must be ignored, not honoured.
-      payload: { email, password: 'a-perfectly-long-password', role: 'admin' },
-    });
+      { email, password: 'a-perfectly-long-password', role: 'admin' },
+      adminToken,
+    );
     expect(res.statusCode).toBe(201);
-    const profile = await me(res.json().accessToken);
-    expect(profile.json().role).toBe('user');
+    expect(res.json().role).toBe('user');
+  });
+
+  it('rejects an unauthenticated request with 401', async () => {
+    const res = await register({
+      email: `${TAG}-anon@test.local`,
+      password: 'a-perfectly-long-password',
+    });
+    expect(res.statusCode).toBe(401);
+    expect(res.json().code).toBe('unauthorized');
+  });
+
+  it('rejects an authenticated non-admin with 403', async () => {
+    const res = await register(
+      { email: `${TAG}-byuser@test.local`, password: 'a-perfectly-long-password' },
+      userToken,
+    );
+    expect(res.statusCode).toBe(403);
+    expect(res.json().code).toBe('forbidden');
   });
 
   it('returns 409 when the email is already in use', async () => {
-    const res = await app.inject({
-      method: 'POST',
-      url: '/v1/users/register',
-      payload: { email: adminEmail, password: 'another-long-password' },
-    });
+    const res = await register({ email: adminEmail, password: 'another-long-password' }, adminToken);
     expect(res.statusCode).toBe(409);
     expect(res.json().code).toBe('email_taken');
   });
 
   it('returns 422 when the password is too short', async () => {
-    const res = await app.inject({
-      method: 'POST',
-      url: '/v1/users/register',
-      payload: { email: `${TAG}-weak@test.local`, password: 'short' },
-    });
+    const res = await register(
+      { email: `${TAG}-weak@test.local`, password: 'short' },
+      adminToken,
+    );
     expect(res.statusCode).toBe(422);
     expect(res.json().code).toBe('validation_failed');
   });
 
   it('admin accounts keep role=admin through login → /me', async () => {
-    const auth = await login(adminEmail, adminPassword);
-    expect(auth.statusCode).toBe(200);
-    const profile = await me(auth.json().accessToken);
+    const profile = await me(adminToken);
     expect(profile.json().role).toBe('admin');
-  });
-});
-
-describe('public self-registration disabled', () => {
-  let lockedApp: FastifyInstance;
-
-  beforeAll(async () => {
-    process.env.DISABLE_PUBLIC_REGISTRATION = 'true';
-    lockedApp = await createServer({ db, skipStorage: true });
-  });
-
-  afterAll(async () => {
-    await lockedApp.close();
-    delete process.env.DISABLE_PUBLIC_REGISTRATION;
-  });
-
-  it('returns 403 registration_disabled', async () => {
-    const res = await lockedApp.inject({
-      method: 'POST',
-      url: '/v1/users/register',
-      payload: { email: `${TAG}-locked@test.local`, password: 'a-perfectly-long-password' },
-    });
-    expect(res.statusCode).toBe(403);
-    expect(res.json().code).toBe('registration_disabled');
   });
 });
 

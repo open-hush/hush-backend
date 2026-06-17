@@ -62,32 +62,25 @@ export const usersRoutes = (deps: UsersDeps): FastifyPluginAsyncZod => async (ap
     return { accessToken, refreshToken, expiresIn: accessTtlSeconds() };
   }
 
-  // Public self-registration for end customers (OPE-18). Anyone can create an
-  // account and is logged straight in (tokens + refresh cookie). The role is
-  // hard-coded to 'user' and never read from the body: self-registration can
-  // never mint an admin, which is the boundary against privilege escalation.
-  // Admins are created only by the bootstrap seed.
+  // Admin-only account creation (OPE-28, aligned with hush-protocol). The
+  // caller must present a valid admin JWT: requireAdmin returns 401 for a
+  // missing/invalid token and 403 for an authenticated non-admin. There is no
+  // public self-registration — the spec is the single source of truth.
   //
-  // Operators who want the locked-down, invite-only posture set
-  // DISABLE_PUBLIC_REGISTRATION=true and create accounts out of band.
-  const publicRegistrationDisabled =
-    (process.env.DISABLE_PUBLIC_REGISTRATION ?? '').toLowerCase() === 'true';
-
+  // The new account is NOT logged in and no tokens are issued: the response is
+  // the created user's profile. The role is hard-coded to 'user' and never
+  // read from the body, so this endpoint can never mint an admin. Admin
+  // accounts are seeded at boot only (BOOTSTRAP_ADMIN_*).
   app.post(
     '/users/register',
     {
+      preHandler: app.requireAdmin,
       schema: {
         body: UserRegisterRequestSchema,
-        response: { 201: AuthTokensSchema, 403: ErrorSchema, 409: ErrorSchema },
+        response: { 201: UserSchema, 401: ErrorSchema, 403: ErrorSchema, 409: ErrorSchema },
       },
     },
     async (req, reply) => {
-      if (publicRegistrationDisabled) {
-        return reply
-          .code(403)
-          .send({ code: 'registration_disabled', message: 'public registration is disabled' });
-      }
-
       const { email, password, displayName } = req.body;
 
       const existing = await db
@@ -103,12 +96,16 @@ export const usersRoutes = (deps: UsersDeps): FastifyPluginAsyncZod => async (ap
       const inserted = await db
         .insertInto('users')
         .values({ email, password_hash, display_name: displayName ?? null, role: 'user' })
-        .returning(['id', 'role'])
+        .returning(['id', 'email', 'display_name', 'role', 'created_at'])
         .executeTakeFirstOrThrow();
 
-      const tokens = await issueTokens(inserted.id, inserted.role);
-      setRefreshCookie(reply, tokens.refreshToken, refreshTtlSeconds());
-      return reply.code(201).send(tokens);
+      return reply.code(201).send({
+        id: inserted.id,
+        email: inserted.email,
+        displayName: inserted.display_name,
+        role: inserted.role,
+        createdAt: ISO(inserted.created_at),
+      });
     },
   );
 

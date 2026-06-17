@@ -101,7 +101,6 @@ let ownerId: string;
 beforeAll(async () => {
   process.env.JWT_SIGNING_KEY = 'x'.repeat(32);
   process.env.METRICS_ENABLED = 'false';
-  delete process.env.DISABLE_PUBLIC_REGISTRATION;
   const databaseUrl = process.env.DATABASE_URL ?? 'postgres://hush:hush@localhost:5432/hush';
   pool = createPool(databaseUrl);
   db = createDb(pool);
