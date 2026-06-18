@@ -75,13 +75,14 @@ export const deviceRoutes = (deps: DeviceDeps): FastifyPluginAsyncZod => async (
       .where('id', '=', deviceId)
       .executeTakeFirst();
 
-    // One 403 for every not-yours / not-usable case: wrong owner, unclaimed,
-    // retired, or unknown id. We do not distinguish them, to avoid leaking
-    // which device ids exist.
+    // One 404 for every not-yours / not-usable case: wrong owner, unclaimed,
+    // retired, or unknown id. We reuse the not-found response the rest of the
+    // device API returns for an inaccessible device, so a user app cannot tell
+    // which device ids exist and the contract stays consistent across endpoints.
     if (!device || device.state !== 'claimed' || device.owner_id !== req.user.sub) {
-      return reply.code(403).send({
-        code: 'device_forbidden',
-        message: 'the requested device is not accessible to this user',
+      return reply.code(404).send({
+        code: 'device_not_found',
+        message: 'device not found',
       });
     }
 
@@ -184,7 +185,7 @@ export const deviceRoutes = (deps: DeviceDeps): FastifyPluginAsyncZod => async (
           304: z.null(),
           400: ErrorSchema,
           401: ErrorSchema,
-          403: ErrorSchema,
+          404: ErrorSchema,
         },
       },
     },
@@ -296,7 +297,7 @@ export const deviceRoutes = (deps: DeviceDeps): FastifyPluginAsyncZod => async (
       schema: {
         querystring: DeviceEventsQuerySchema,
         body: DeviceEventsRequestSchema,
-        response: { 202: z.null(), 400: ErrorSchema, 401: ErrorSchema, 403: ErrorSchema, 422: ErrorSchema },
+        response: { 202: z.null(), 400: ErrorSchema, 401: ErrorSchema, 404: ErrorSchema, 422: ErrorSchema },
       },
     },
     async (req, reply) => {
