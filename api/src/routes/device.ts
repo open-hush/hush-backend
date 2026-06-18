@@ -1,11 +1,13 @@
 import { randomBytes } from 'node:crypto';
 
+import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import type { Kysely } from 'kysely';
 import type { S3Client } from '@aws-sdk/client-s3';
 import { z } from 'zod';
 
 import {
+  DeviceEventsQuerySchema,
   DeviceEventsRequestSchema,
   DeviceRegisterRequestSchema,
   DeviceRegisterResponseSchema,
@@ -40,6 +42,51 @@ const SYNC_PRESIGN_TTL_SEC = Number(process.env.SYNC_PRESIGN_TTL_SEC ?? 1800);
 
 export const deviceRoutes = (deps: DeviceDeps): FastifyPluginAsyncZod => async (app) => {
   const { db, s3, s3Config } = deps;
+
+  const HMAC_HEADER_RE = /^HMAC\s+/i;
+
+  // Dual-auth pre-handler for endpoints a user app can drive on a device's
+  // behalf. A `deviceHmac` caller keeps the existing physical-device flow
+  // untouched. A `userJwt` caller must pass `device_id` referencing a claimed
+  // device they own; on success we set `req.device` so the handler downstream
+  // is identical for both callers.
+  const requireDeviceOrUser = async (req: FastifyRequest, reply: FastifyReply): Promise<void> => {
+    const header = req.headers.authorization ?? '';
+    if (HMAC_HEADER_RE.test(header)) {
+      // Physical device flow — unchanged. requireDevice throws 401 on failure.
+      await app.requireDevice(req);
+      return;
+    }
+
+    // App-acting-as-device flow. requireUser throws 401 on a missing/invalid JWT.
+    await app.requireUser(req);
+
+    const { device_id: deviceId } = req.query as { device_id?: string };
+    if (!deviceId) {
+      return reply.code(400).send({
+        code: 'device_id_required',
+        message: 'device_id query parameter is required when authenticating as a user',
+      });
+    }
+
+    const device = await db
+      .selectFrom('devices')
+      .select(['id', 'owner_id', 'state'])
+      .where('id', '=', deviceId)
+      .executeTakeFirst();
+
+    // One 403 for every not-yours / not-usable case: wrong owner, unclaimed,
+    // retired, or unknown id. We do not distinguish them, to avoid leaking
+    // which device ids exist.
+    if (!device || device.state !== 'claimed' || device.owner_id !== req.user.sub) {
+      return reply.code(403).send({
+        code: 'device_forbidden',
+        message: 'the requested device is not accessible to this user',
+      });
+    }
+
+    req.device = { id: device.id };
+  };
 
   app.post(
     '/device/register',
@@ -129,13 +176,15 @@ export const deviceRoutes = (deps: DeviceDeps): FastifyPluginAsyncZod => async (
   app.get(
     '/device/sync',
     {
-      preHandler: app.requireDevice,
+      preHandler: requireDeviceOrUser,
       schema: {
         querystring: DeviceSyncQuerySchema,
         response: {
           200: DeviceSyncResponseSchema,
           304: z.null(),
+          400: ErrorSchema,
           401: ErrorSchema,
+          403: ErrorSchema,
         },
       },
     },
@@ -243,10 +292,11 @@ export const deviceRoutes = (deps: DeviceDeps): FastifyPluginAsyncZod => async (
   app.post(
     '/device/events',
     {
-      preHandler: app.requireDevice,
+      preHandler: requireDeviceOrUser,
       schema: {
+        querystring: DeviceEventsQuerySchema,
         body: DeviceEventsRequestSchema,
-        response: { 202: z.null(), 401: ErrorSchema, 422: ErrorSchema },
+        response: { 202: z.null(), 400: ErrorSchema, 401: ErrorSchema, 403: ErrorSchema, 422: ErrorSchema },
       },
     },
     async (req, reply) => {
