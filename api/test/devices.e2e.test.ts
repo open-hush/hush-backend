@@ -281,7 +281,7 @@ describe('POST /v1/device/events (userJwt acting as device)', () => {
     expect(res.json().code).toBe('device_id_required');
   });
 
-  it("403s on another user's device (no IDOR)", async () => {
+  it("404s on another user's device (no IDOR, no existence leak)", async () => {
     const id = await seedDevice({ serial: `${TAG}-evt-other`, ownerId: otherId, state: 'claimed' });
     const res = await app.inject({
       method: 'POST',
@@ -289,11 +289,11 @@ describe('POST /v1/device/events (userJwt acting as device)', () => {
       headers: auth(ownerToken),
       payload: oneEvent(),
     });
-    expect(res.statusCode).toBe(403);
-    expect(res.json().code).toBe('device_forbidden');
+    expect(res.statusCode).toBe(404);
+    expect(res.json().code).toBe('device_not_found');
   });
 
-  it('403s on an unclaimed device even when owned', async () => {
+  it('404s on an unclaimed device even when owned', async () => {
     const id = await seedDevice({ serial: `${TAG}-evt-unclaimed`, ownerId, state: 'unclaimed' });
     const res = await app.inject({
       method: 'POST',
@@ -301,17 +301,17 @@ describe('POST /v1/device/events (userJwt acting as device)', () => {
       headers: auth(ownerToken),
       payload: oneEvent(),
     });
-    expect(res.statusCode).toBe(403);
+    expect(res.statusCode).toBe(404);
   });
 
-  it('403s on an unknown device_id (no existence leak)', async () => {
+  it('404s on an unknown device_id (no existence leak)', async () => {
     const res = await app.inject({
       method: 'POST',
       url: `/v1/device/events?device_id=${randomUUID()}`,
       headers: auth(ownerToken),
       payload: oneEvent(),
     });
-    expect(res.statusCode).toBe(403);
+    expect(res.statusCode).toBe(404);
   });
 
   it('401s without any authentication', async () => {
@@ -332,15 +332,15 @@ describe('GET /v1/device/sync (userJwt acting as device — auth gate)', () => {
     expect(res.json().code).toBe('device_id_required');
   });
 
-  it("403s on another user's device", async () => {
+  it("404s on another user's device (no existence leak)", async () => {
     const id = await seedDevice({ serial: `${TAG}-sync-other`, ownerId: otherId, state: 'claimed' });
     const res = await app.inject({
       method: 'GET',
       url: `/v1/device/sync?device_id=${id}`,
       headers: auth(ownerToken),
     });
-    expect(res.statusCode).toBe(403);
-    expect(res.json().code).toBe('device_forbidden');
+    expect(res.statusCode).toBe(404);
+    expect(res.json().code).toBe('device_not_found');
   });
 
   it('401s without any authentication', async () => {

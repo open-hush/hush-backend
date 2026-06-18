@@ -80,6 +80,13 @@ export interface paths {
          *     the dashboard). The response is the **complete current state**: cards,
          *     audio items with presigned URLs, power-saving thresholds and feature
          *     flags. Clients diff against their cached version.
+         *
+         *     Two callers are accepted:
+         *     - A **physical device** authenticating with `deviceHmac`; the device is
+         *       resolved from the HMAC `keyId`.
+         *     - A **user app acting as a device** authenticating with `userJwt`. In
+         *       this case `device_id` is **required** and must reference a claimed
+         *       device owned by the caller.
          */
         get: operations["syncDevice"];
         put?: never;
@@ -103,6 +110,13 @@ export interface paths {
          * Push a batch of events from the device.
          * @description Devices buffer events (card scans, button presses, errors) locally and
          *     flush them in batches. The endpoint is idempotent on `eventId`.
+         *
+         *     Two callers are accepted:
+         *     - A **physical device** authenticating with `deviceHmac`; the device is
+         *       resolved from the HMAC `keyId`.
+         *     - A **user app acting as a device** authenticating with `userJwt`. In
+         *       this case `device_id` is **required** and must reference a claimed
+         *       device owned by the caller.
          */
         post: operations["postDeviceEvents"];
         delete?: never;
@@ -1009,6 +1023,15 @@ export interface components {
                 "application/json": components["schemas"]["Error"];
             };
         };
+        /** @description The request is malformed or missing a required parameter. */
+        BadRequest: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
         /** @description Resource not found. */
         NotFound: {
             headers: {
@@ -1185,6 +1208,12 @@ export interface operations {
             query?: {
                 /** @description ISO-8601 timestamp of the last successful sync. If omitted, a full snapshot is returned. */
                 since?: string;
+                /**
+                 * @description Target device UUID. Ignored for `deviceHmac` callers (the device is
+                 *     taken from the signature). **Required** for `userJwt` callers and
+                 *     must reference a claimed device owned by the caller.
+                 */
+                device_id?: string;
             };
             header?: never;
             path?: never;
@@ -1208,12 +1237,21 @@ export interface operations {
                 };
                 content?: never;
             };
+            400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
         };
     };
     postDeviceEvents: {
         parameters: {
-            query?: never;
+            query?: {
+                /**
+                 * @description Target device UUID. Ignored for `deviceHmac` callers (the device is
+                 *     taken from the signature). **Required** for `userJwt` callers and
+                 *     must reference a claimed device owned by the caller.
+                 */
+                device_id?: string;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1231,7 +1269,9 @@ export interface operations {
                 };
                 content?: never;
             };
+            400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
             422: components["responses"]["Unprocessable"];
             429: components["responses"]["TooManyRequests"];
         };
