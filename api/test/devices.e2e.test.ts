@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import type { Kysely } from 'kysely';
@@ -230,6 +232,119 @@ describe('DELETE /v1/devices/:id (retire)', () => {
   it('requires authentication', async () => {
     const id = await seedDevice({ serial: `${TAG}-del-noauth`, ownerId });
     const res = await app.inject({ method: 'DELETE', url: `/v1/devices/${id}` });
+    expect(res.statusCode).toBe(401);
+  });
+});
+
+// Dual auth: a user app (userJwt) can drive a device it owns by passing
+// `device_id`, alongside the existing physical-device HMAC flow (OPE-32).
+describe('POST /v1/device/events (userJwt acting as device)', () => {
+  function oneEvent() {
+    return {
+      events: [
+        {
+          eventId: randomUUID(),
+          ts: new Date().toISOString(),
+          type: 'button_pressed' as const,
+        },
+      ],
+    };
+  }
+
+  it('accepts events for a claimed device owned by the caller', async () => {
+    const id = await seedDevice({ serial: `${TAG}-evt-ok`, ownerId, state: 'claimed' });
+    const body = oneEvent();
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/device/events?device_id=${id}`,
+      headers: auth(ownerToken),
+      payload: body,
+    });
+    expect(res.statusCode).toBe(202);
+
+    const row = await db
+      .selectFrom('device_events')
+      .select(['device_id'])
+      .where('event_id', '=', body.events[0]!.eventId)
+      .executeTakeFirst();
+    expect(row?.device_id).toBe(id);
+  });
+
+  it('400s when device_id is missing for a user caller', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/device/events',
+      headers: auth(ownerToken),
+      payload: oneEvent(),
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().code).toBe('device_id_required');
+  });
+
+  it("403s on another user's device (no IDOR)", async () => {
+    const id = await seedDevice({ serial: `${TAG}-evt-other`, ownerId: otherId, state: 'claimed' });
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/device/events?device_id=${id}`,
+      headers: auth(ownerToken),
+      payload: oneEvent(),
+    });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().code).toBe('device_forbidden');
+  });
+
+  it('403s on an unclaimed device even when owned', async () => {
+    const id = await seedDevice({ serial: `${TAG}-evt-unclaimed`, ownerId, state: 'unclaimed' });
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/device/events?device_id=${id}`,
+      headers: auth(ownerToken),
+      payload: oneEvent(),
+    });
+    expect(res.statusCode).toBe(403);
+  });
+
+  it('403s on an unknown device_id (no existence leak)', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/device/events?device_id=${randomUUID()}`,
+      headers: auth(ownerToken),
+      payload: oneEvent(),
+    });
+    expect(res.statusCode).toBe(403);
+  });
+
+  it('401s without any authentication', async () => {
+    const id = await seedDevice({ serial: `${TAG}-evt-noauth`, ownerId, state: 'claimed' });
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/device/events?device_id=${id}`,
+      payload: oneEvent(),
+    });
+    expect(res.statusCode).toBe(401);
+  });
+});
+
+describe('GET /v1/device/sync (userJwt acting as device — auth gate)', () => {
+  it('400s when device_id is missing for a user caller', async () => {
+    const res = await app.inject({ method: 'GET', url: '/v1/device/sync', headers: auth(ownerToken) });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().code).toBe('device_id_required');
+  });
+
+  it("403s on another user's device", async () => {
+    const id = await seedDevice({ serial: `${TAG}-sync-other`, ownerId: otherId, state: 'claimed' });
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/device/sync?device_id=${id}`,
+      headers: auth(ownerToken),
+    });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().code).toBe('device_forbidden');
+  });
+
+  it('401s without any authentication', async () => {
+    const res = await app.inject({ method: 'GET', url: `/v1/device/sync?device_id=${randomUUID()}` });
     expect(res.statusCode).toBe(401);
   });
 });

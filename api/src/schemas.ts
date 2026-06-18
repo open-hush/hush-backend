@@ -202,6 +202,9 @@ export const AudioSyncEntrySchema = z.object({
 
 export const DeviceSyncQuerySchema = z.object({
   since: z.string().datetime().optional(),
+  // Required only for `userJwt` callers (app acting as a device); ignored for
+  // `deviceHmac` callers, which resolve the device from the signature keyId.
+  device_id: z.string().uuid().optional(),
 });
 
 export const DeviceSyncResponseSchema = z.object({
@@ -230,6 +233,12 @@ export const DeviceEventSchema = z.object({
 
 export const DeviceEventsRequestSchema = z.object({
   events: z.array(DeviceEventSchema).min(1).max(200),
+});
+
+export const DeviceEventsQuerySchema = z.object({
+  // Required only for `userJwt` callers (app acting as a device); ignored for
+  // `deviceHmac` callers, which resolve the device from the signature keyId.
+  device_id: z.string().uuid().optional(),
 });
 
 export const DeviceListQuerySchema = z.object({
