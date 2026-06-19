@@ -25,6 +25,7 @@ import { devicesRoutes } from './routes/devices.js';
 import { audioRoutes } from './routes/audio.js';
 import { firmwareRoutes } from './routes/firmware.js';
 import { readyRoutes } from './routes/ready.js';
+import { configRoutes } from './routes/config.js';
 import { createS3Client, readS3Config, type S3Config } from './storage/s3.js';
 import { TranscodeQueue } from './transcode/queue.js';
 
@@ -152,6 +153,7 @@ export async function createServer(opts: CreateServerOptions = {}): Promise<Fast
   await app.register(healthRoutes, { prefix: '/v1' });
   await app.register(readyRoutes({ db, s3, s3Config }), { prefix: '/v1' });
   await app.register(usersRoutes({ db }), { prefix: '/v1' });
+  await app.register(configRoutes(), { prefix: '/v1' });
   await app.register(deviceRoutes({ db, s3, s3Config }), { prefix: '/v1' });
   await app.register(devicesRoutes({ db }), { prefix: '/v1' });
   if (queue && s3 && s3Config) {

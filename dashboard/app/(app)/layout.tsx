@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
-import { CassetteTape, LayoutDashboard, LogOut, Speaker, Users } from "lucide-react";
+import { CassetteTape, LayoutDashboard, LogOut, Settings, Speaker, Users } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -17,7 +17,10 @@ const BASE_NAV = [
 
 // Admin-only entries. Hiding them in the sidebar is convenience, not access
 // control — the API enforces the admin gate on every /v1/users route.
-const ADMIN_NAV = [{ href: "/users", label: "Users", icon: Users }];
+const ADMIN_NAV = [
+  { href: "/users", label: "Users", icon: Users },
+  { href: "/config", label: "Configuration", icon: Settings },
+];
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();

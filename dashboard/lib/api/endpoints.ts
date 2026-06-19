@@ -10,6 +10,7 @@ import type {
   CardBinding,
   CardBindingList,
   CardBindingRequest,
+  ConfigStatus,
   Device,
   DeviceClaimRequest,
   DeviceList,
@@ -35,6 +36,12 @@ export const authApi = {
 export const usersApi = {
   list: (cursor?: string) =>
     apiFetch<UserList>(`/v1/users${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`),
+};
+
+// Admin-only, read-only status of external service configuration (OPE-21).
+// The API enforces the admin gate and never returns secret values.
+export const configApi = {
+  get: () => apiFetch<ConfigStatus>("/v1/config"),
 };
 
 export const devicesApi = {
