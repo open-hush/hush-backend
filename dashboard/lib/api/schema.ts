@@ -476,6 +476,39 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * External service configuration status (admin only).
+         * @description Read-only status of the external services the backend integrates with:
+         *     email (Resend), audio object storage (S3 / MinIO / R2), log traces
+         *     (BetterStack) and crash reporting (Sentry). For each service it reports
+         *     whether it is configured, the **names** of the environment variables
+         *     that drive it, and a handful of non-secret resolved hints (region,
+         *     bucket, masked endpoint, …).
+         *
+         *     Configuration is operator-owned: values live in the backend's
+         *     environment (`.env`) and are read at process start. This endpoint
+         *     **never** returns a secret value — only whether each variable is set.
+         *     To change a value, edit the environment and restart the backend.
+         *
+         *     Admin-only: an unauthenticated request gets `401` and an authenticated
+         *     non-admin gets `403`.
+         */
+        get: operations["getConfig"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export interface webhooks {
     deviceOnline: {
@@ -555,6 +588,41 @@ export interface components {
             latencyMs?: number;
             /** @description Short failure description. Present when `status` is not `ok`. */
             error?: string;
+        };
+        ConfigStatus: {
+            /** @description One entry per external service the backend integrates with. */
+            services: components["schemas"]["ServiceConfig"][];
+        };
+        ServiceConfig: {
+            /**
+             * @description Stable machine key for the service.
+             * @enum {string}
+             */
+            service: "email" | "storage" | "traces" | "crash";
+            /** @description Human-readable service name for the dashboard. */
+            label: string;
+            /** @description True when every `required` variable of this service is set. */
+            configured: boolean;
+            /** @description Environment variables that drive this service. */
+            variables: components["schemas"]["ConfigVariable"][];
+            /**
+             * @description Non-secret resolved values that help an operator confirm which
+             *     environment is loaded (region, bucket, masked endpoint, …). Never
+             *     contains a secret value.
+             */
+            hints?: {
+                [key: string]: string;
+            };
+        };
+        ConfigVariable: {
+            /** @description Environment variable name, e.g. `RESEND_API_KEY`. */
+            name: string;
+            /** @description Whether the variable is present and non-empty. The value itself is never returned. */
+            set: boolean;
+            /** @description Whether the value is sensitive. Secret values are never exposed, set or not. */
+            secret: boolean;
+            /** @description Whether this variable counts toward the service's `configured` flag. */
+            required: boolean;
         };
         Error: {
             /**
@@ -1849,6 +1917,36 @@ export interface operations {
                 };
             };
             429: components["responses"]["TooManyRequests"];
+        };
+    };
+    getConfig: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Per-service configuration status. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConfigStatus"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description The caller is authenticated but is not an admin. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     deviceOnlineWebhook: {

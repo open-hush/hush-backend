@@ -97,6 +97,32 @@ export const ReadySchema = z.object({
   checks: z.record(z.string(), ReadyCheckSchema),
 });
 
+// External service configuration status (OPE-21). Read-only: reports whether
+// each service's env vars are set, never their values. Source of truth is the
+// `ConfigStatus` schema in hush-protocol.
+
+export const ConfigServiceSchema = z.enum(['email', 'storage', 'traces', 'crash']);
+
+export const ConfigVariableSchema = z.object({
+  name: z.string(),
+  set: z.boolean(),
+  secret: z.boolean(),
+  required: z.boolean(),
+});
+
+export const ServiceConfigSchema = z.object({
+  service: ConfigServiceSchema,
+  label: z.string(),
+  configured: z.boolean(),
+  variables: z.array(ConfigVariableSchema),
+  hints: z.record(z.string(), z.string()).optional(),
+});
+
+export const ConfigStatusSchema = z.object({
+  services: z.array(ServiceConfigSchema),
+});
+export type ConfigStatus = z.infer<typeof ConfigStatusSchema>;
+
 // Audio / phase 2
 
 export const ALLOWED_SOURCE_CONTENT_TYPES = [
