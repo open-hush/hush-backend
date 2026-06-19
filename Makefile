@@ -2,10 +2,11 @@
 #
 # Two projects ship together:
 #   api/        Fastify + TypeScript  (pnpm)
-#   dashboard/  Next.js 15            (npm)
+#   dashboard/  Next.js 15            (pnpm)
 #
-# Package managers are NOT mixed: pnpm only in api/, npm only in dashboard/.
-# The data plane (Postgres + MinIO) comes from docker-compose.yml at the root.
+# Both projects use pnpm; they are not a pnpm workspace, so each has its own
+# package.json and pnpm-lock.yaml. The data plane (Postgres + MinIO) comes
+# from docker-compose.yml at the root.
 
 API_DIR  := api
 DASH_DIR := dashboard
@@ -42,8 +43,8 @@ install: api-install dashboard-install ## Install deps for both projects
 api-install: ## Install api deps (pnpm)
 	cd $(API_DIR) && pnpm install
 
-dashboard-install: ## Install dashboard deps (npm)
-	cd $(DASH_DIR) && npm install
+dashboard-install: ## Install dashboard deps (pnpm)
+	cd $(DASH_DIR) && pnpm install
 
 # ---------------------------------------------------------------------------
 # Dev servers
@@ -53,7 +54,7 @@ api-start: ## Run the api in watch mode (http://localhost:8080)
 	cd $(API_DIR) && pnpm run dev
 
 dashboard-start: ## Run the dashboard dev server (http://localhost:3000)
-	cd $(DASH_DIR) && npm run dev
+	cd $(DASH_DIR) && pnpm run dev
 
 # ---------------------------------------------------------------------------
 # Build / start
@@ -65,7 +66,7 @@ api-build: ## Build the api (tsc)
 	cd $(API_DIR) && pnpm run build
 
 dashboard-build: ## Build the dashboard (next build)
-	cd $(DASH_DIR) && npm run build
+	cd $(DASH_DIR) && pnpm run build
 
 # ---------------------------------------------------------------------------
 # Quality gates
@@ -77,7 +78,7 @@ api-typecheck: ## Typecheck the api
 	cd $(API_DIR) && pnpm run typecheck
 
 dashboard-typecheck: ## Typecheck the dashboard
-	cd $(DASH_DIR) && npm run typecheck
+	cd $(DASH_DIR) && pnpm run typecheck
 
 lint: api-lint dashboard-lint ## Lint both projects
 
@@ -85,7 +86,7 @@ api-lint: ## Lint the api (eslint)
 	cd $(API_DIR) && pnpm run lint
 
 dashboard-lint: ## Lint the dashboard (next lint)
-	cd $(DASH_DIR) && npm run lint
+	cd $(DASH_DIR) && pnpm run lint
 
 test: ## Run the api test suite (vitest)
 	cd $(API_DIR) && pnpm run test
@@ -110,7 +111,7 @@ migrate-create: ## Create a migration (usage: make migrate-create name=add_foo)
 # ---------------------------------------------------------------------------
 .PHONY: gen-api
 gen-api: ## Regenerate the dashboard API client from hush-api.yaml
-	cd $(DASH_DIR) && npm run gen:api
+	cd $(DASH_DIR) && pnpm run gen:api
 
 # ---------------------------------------------------------------------------
 # Operational scripts
