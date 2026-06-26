@@ -73,6 +73,9 @@ export const DeviceRegisterRequestSchema = z.object({
     .string()
     .regex(/^([0-9a-f]{2}:){5}[0-9a-f]{2}$/)
     .optional(),
+  // Software-only device registered by a user app via `userJwt`. Ignored
+  // (treated as `false`) for `deviceHmac` callers.
+  virtual: z.boolean().default(false),
 });
 
 export const DeviceRegisterResponseSchema = z.object({
