@@ -15,7 +15,7 @@ import {
   DeviceSyncResponseSchema,
   ErrorSchema,
 } from '../schemas.js';
-import type { Database } from '../db/types.js';
+import type { Database, DeviceState } from '../db/types.js';
 import { presignGet, type S3Config } from '../storage/s3.js';
 
 const ISO = (d: Date | string): string =>
@@ -30,6 +30,60 @@ function newClaimCode(): string {
   let out = '';
   for (const b of buf) out += alphabet[b % alphabet.length];
   return out;
+}
+
+// Columns every register response is built from. Kept in one place so the
+// physical, idempotent-virtual and new-virtual paths return an identical shape.
+const REGISTER_RETURNING = [
+  'id',
+  'serial',
+  'owner_id',
+  'name',
+  'state',
+  'firmware_version',
+  'last_seen_at',
+  'created_at',
+] as const;
+
+interface RegisterRow {
+  id: string;
+  serial: string;
+  owner_id: string | null;
+  name: string | null;
+  state: DeviceState;
+  firmware_version: string | null;
+  last_seen_at: Date | null;
+  created_at: Date;
+}
+
+function deviceResponse(row: RegisterRow) {
+  return {
+    id: row.id,
+    serial: row.serial,
+    ownerId: row.owner_id,
+    name: row.name,
+    state: row.state,
+    firmwareVersion: row.firmware_version,
+    lastSeenAt: row.last_seen_at ? ISO(row.last_seen_at) : null,
+    createdAt: ISO(row.created_at),
+  };
+}
+
+// Claim codes only live while a device is `unclaimed`; an expired or missing one
+// is rotated. A claimed/retired device carries no claim code.
+function resolveClaimCode(
+  state: DeviceState,
+  current: string | null,
+  expires: Date | null,
+): { claimCode: string | null; claimExpires: Date | null } {
+  if (state !== 'unclaimed') return { claimCode: null, claimExpires: null };
+  if (!current || !expires || expires.getTime() <= Date.now()) {
+    return {
+      claimCode: newClaimCode(),
+      claimExpires: new Date(Date.now() + CLAIM_CODE_TTL_SEC * 1000),
+    };
+  }
+  return { claimCode: current, claimExpires: expires };
 }
 
 interface DeviceDeps {
@@ -89,10 +143,25 @@ export const deviceRoutes = (deps: DeviceDeps): FastifyPluginAsyncZod => async (
     req.device = { id: device.id };
   };
 
+  // Dual-auth pre-handler for first-boot registration. A `deviceHmac` caller is
+  // a physical device proving possession of its baked-in secret; `req.device` is
+  // set and the existing flow runs unchanged. A `userJwt` caller is a user app
+  // registering a virtual device; only `req.user` is set and the handler takes
+  // the virtual branch. Unlike `requireDeviceOrUser` this does NOT require a
+  // pre-existing device for the user path — the device is created on the fly.
+  const requireDeviceOrUserForRegister = async (req: FastifyRequest): Promise<void> => {
+    const header = req.headers.authorization ?? '';
+    if (HMAC_HEADER_RE.test(header)) {
+      await app.requireDevice(req);
+      return;
+    }
+    await app.requireUser(req);
+  };
+
   app.post(
     '/device/register',
     {
-      preHandler: app.requireDevice,
+      preHandler: requireDeviceOrUserForRegister,
       schema: {
         body: DeviceRegisterRequestSchema,
         response: {
@@ -103,73 +172,156 @@ export const deviceRoutes = (deps: DeviceDeps): FastifyPluginAsyncZod => async (
       },
     },
     async (req, reply) => {
-      const deviceId = req.device?.id;
-      if (!deviceId) return reply.code(401).send({ code: 'unauthorized', message: 'unauthorized' });
-
       const { serial, firmwareVersion, macAddress } = req.body;
 
-      const row = await db
+      // ---- Physical device flow (deviceHmac): device pre-exists, resolved by
+      // HMAC keyId. Behaviour is unchanged from the original handler.
+      const deviceId = req.device?.id;
+      if (deviceId) {
+        const row = await db
+          .selectFrom('devices')
+          .select(['serial', 'state', 'mac_address', 'claim_code', 'claim_code_expires_at'])
+          .where('id', '=', deviceId)
+          .executeTakeFirst();
+
+        if (!row) {
+          return reply.code(401).send({ code: 'unauthorized', message: 'unknown device' });
+        }
+        if (row.serial !== serial) {
+          return reply.code(422).send({ code: 'serial_mismatch', message: 'serial does not match' });
+        }
+
+        const { claimCode, claimExpires } = resolveClaimCode(
+          row.state,
+          row.claim_code,
+          row.claim_code_expires_at,
+        );
+
+        const now = new Date();
+        const updated = await db
+          .updateTable('devices')
+          .set({
+            firmware_version: firmwareVersion,
+            mac_address: macAddress ?? row.mac_address,
+            last_seen_at: now,
+            updated_at: now,
+            claim_code: claimCode,
+            claim_code_expires_at: claimExpires,
+          })
+          .where('id', '=', deviceId)
+          .returning(REGISTER_RETURNING)
+          .executeTakeFirstOrThrow();
+
+        return reply.code(200).send({
+          device: deviceResponse(updated),
+          claimCode: claimCode ?? undefined,
+        });
+      }
+
+      // ---- Virtual device flow (userJwt): the user app registers a
+      // software-only device for itself.
+      const userId = req.user?.sub;
+      if (!userId) return reply.code(401).send({ code: 'unauthorized', message: 'unauthorized' });
+
+      if (req.body.virtual !== true) {
+        return reply.code(422).send({
+          code: 'virtual_required',
+          message: 'virtual must be true when registering as a user',
+        });
+      }
+
+      // Idempotent on serial. We join `device_secrets` to tell a physical device
+      // (it has a baked-in HMAC secret) apart from a virtual one. Returning the
+      // record for a serial the caller cannot own — a physical device, or another
+      // user's claimed device — would hand them a claim code for hardware they do
+      // not possess, so those are hard conflicts.
+      const existing = await db
         .selectFrom('devices')
+        .leftJoin('device_secrets', 'device_secrets.device_id', 'devices.id')
         .select([
-          'id',
-          'serial',
-          'owner_id',
-          'name',
-          'state',
-          'firmware_version',
-          'mac_address',
-          'last_seen_at',
-          'claim_code',
-          'claim_code_expires_at',
-          'created_at',
+          'devices.id',
+          'devices.serial',
+          'devices.owner_id',
+          'devices.name',
+          'devices.state',
+          'devices.firmware_version',
+          'devices.mac_address',
+          'devices.claim_code',
+          'devices.claim_code_expires_at',
+          'devices.last_seen_at',
+          'devices.created_at',
+          'device_secrets.device_id as secret_device_id',
         ])
-        .where('id', '=', deviceId)
+        .where('devices.serial', '=', serial)
         .executeTakeFirst();
 
-      if (!row) {
-        return reply.code(401).send({ code: 'unauthorized', message: 'unknown device' });
-      }
-      if (row.serial !== serial) {
-        return reply.code(422).send({ code: 'serial_mismatch', message: 'serial does not match' });
+      if (existing) {
+        const isPhysical = existing.secret_device_id !== null;
+        const ownedByOther = existing.owner_id !== null && existing.owner_id !== userId;
+        if (isPhysical || ownedByOther) {
+          return reply.code(422).send({ code: 'serial_taken', message: 'serial already registered' });
+        }
+
+        const { claimCode, claimExpires } = resolveClaimCode(
+          existing.state,
+          existing.claim_code,
+          existing.claim_code_expires_at,
+        );
+
+        const now = new Date();
+        const updated = await db
+          .updateTable('devices')
+          .set({
+            firmware_version: firmwareVersion,
+            mac_address: macAddress ?? existing.mac_address,
+            last_seen_at: now,
+            updated_at: now,
+            claim_code: claimCode,
+            claim_code_expires_at: claimExpires,
+          })
+          .where('id', '=', existing.id)
+          .returning(REGISTER_RETURNING)
+          .executeTakeFirstOrThrow();
+
+        return reply.code(200).send({
+          device: deviceResponse(updated),
+          claimCode: claimCode ?? undefined,
+        });
       }
 
-      let claimCode = row.claim_code;
-      let claimExpires = row.claim_code_expires_at;
-      if (row.state === 'unclaimed' && (!claimCode || !claimExpires || claimExpires.getTime() <= Date.now())) {
-        claimCode = newClaimCode();
-        claimExpires = new Date(Date.now() + CLAIM_CODE_TTL_SEC * 1000);
-      } else if (row.state !== 'unclaimed') {
-        claimCode = null;
-        claimExpires = null;
-      }
-
+      // New virtual device: unclaimed, no owner, fresh claim code.
       const now = new Date();
-      const updated = await db
-        .updateTable('devices')
-        .set({
-          firmware_version: firmwareVersion,
-          mac_address: macAddress ?? row.mac_address,
-          last_seen_at: now,
-          updated_at: now,
-          claim_code: claimCode,
-          claim_code_expires_at: claimExpires,
-        })
-        .where('id', '=', deviceId)
-        .returning(['id', 'serial', 'owner_id', 'name', 'state', 'firmware_version', 'last_seen_at', 'created_at'])
-        .executeTakeFirstOrThrow();
+      const claimCode = newClaimCode();
+      const claimExpires = new Date(Date.now() + CLAIM_CODE_TTL_SEC * 1000);
+
+      let created: RegisterRow;
+      try {
+        created = await db
+          .insertInto('devices')
+          .values({
+            serial,
+            owner_id: null,
+            state: 'unclaimed',
+            firmware_version: firmwareVersion,
+            mac_address: macAddress ?? null,
+            claim_code: claimCode,
+            claim_code_expires_at: claimExpires,
+            last_seen_at: now,
+          })
+          .returning(REGISTER_RETURNING)
+          .executeTakeFirstOrThrow();
+      } catch (err) {
+        // Lost a race on the unique `serial` constraint between the select and
+        // the insert. Treat it as the conflict it is rather than a 500.
+        if ((err as { code?: string }).code === '23505') {
+          return reply.code(422).send({ code: 'serial_taken', message: 'serial already registered' });
+        }
+        throw err;
+      }
 
       return reply.code(200).send({
-        device: {
-          id: updated.id,
-          serial: updated.serial,
-          ownerId: updated.owner_id,
-          name: updated.name,
-          state: updated.state,
-          firmwareVersion: updated.firmware_version,
-          lastSeenAt: updated.last_seen_at ? ISO(updated.last_seen_at) : null,
-          createdAt: ISO(updated.created_at),
-        },
-        claimCode: claimCode ?? undefined,
+        device: deviceResponse(created),
+        claimCode,
       });
     },
   );
