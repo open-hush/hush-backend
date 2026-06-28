@@ -270,6 +270,18 @@ export const DeviceEventsQuerySchema = z.object({
   device_id: z.string().uuid().optional(),
 });
 
+export const DeviceEventListQuerySchema = z.object({
+  cursor: z.string().optional(),
+  // Optional single-type filter (e.g. `card_unknown` for the app's
+  // "cards to bind" list). When omitted, every event type is returned.
+  type: DeviceEventTypeSchema.optional(),
+});
+
+export const DeviceEventListSchema = z.object({
+  items: z.array(DeviceEventSchema),
+  nextCursor: z.string().optional(),
+});
+
 export const DeviceListQuerySchema = z.object({
   cursor: z.string().optional(),
 });

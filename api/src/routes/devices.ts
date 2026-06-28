@@ -7,6 +7,8 @@ import {
   CardBindingRequestSchema,
   CardBindingSchema,
   DeviceClaimRequestSchema,
+  DeviceEventListQuerySchema,
+  DeviceEventListSchema,
   DeviceListQuerySchema,
   DeviceListSchema,
   DeviceSchema,
@@ -21,6 +23,7 @@ const ISO = (d: Date | string): string =>
 
 const PARAM_DEVICE_ID = z.object({ id: z.string().uuid() });
 const DEVICES_PAGE_SIZE = 50;
+const DEVICE_EVENTS_PAGE_SIZE = 50;
 
 function deviceToApi(row: {
   id: string;
@@ -235,6 +238,78 @@ export const devicesRoutes = (deps: DevicesDeps): FastifyPluginAsyncZod => async
 
       return reply.code(200).send({
         items: rows.map((r) => ({ uid: r.uid, audioId: r.audio_id, boundAt: ISO(r.bound_at) })),
+      });
+    },
+  );
+
+  app.get(
+    '/devices/:id/events',
+    {
+      preHandler: app.requireUser,
+      schema: {
+        params: PARAM_DEVICE_ID,
+        querystring: DeviceEventListQuerySchema,
+        response: { 200: DeviceEventListSchema, 401: ErrorSchema, 404: ErrorSchema },
+      },
+    },
+    async (req, reply) => {
+      const userId = req.user.sub;
+
+      // Owner-scoped, no existence leak: a device owned by someone else (or
+      // unknown) is a 404, never a 403 — same contract as the rest of the
+      // device sub-resources.
+      const device = await db
+        .selectFrom('devices')
+        .select(['id', 'owner_id'])
+        .where('id', '=', req.params.id)
+        .executeTakeFirst();
+      if (!device || device.owner_id !== userId) {
+        return reply.code(404).send({ code: 'not_found', message: 'device not found' });
+      }
+
+      const cursor = req.query.cursor ? decodeCursor(req.query.cursor) : null;
+
+      let q = db
+        .selectFrom('device_events')
+        .select(['event_id', 'ts', 'type', 'payload'])
+        .where('device_id', '=', req.params.id)
+        .orderBy('ts', 'desc')
+        .orderBy('event_id', 'desc')
+        .limit(DEVICE_EVENTS_PAGE_SIZE + 1);
+
+      if (req.query.type) {
+        q = q.where('type', '=', req.query.type);
+      }
+
+      // Keyset pagination over (ts, event_id) descending — mirrors the device
+      // list. The cursor reuses the (createdAt, id) envelope: createdAt = ts.
+      if (cursor) {
+        const ts = new Date(cursor.createdAt);
+        q = q.where((eb) =>
+          eb.or([
+            eb('ts', '<', ts),
+            eb.and([eb('ts', '=', ts), eb('event_id', '<', cursor.id)]),
+          ]),
+        );
+      }
+
+      const rows = await q.execute();
+      const hasMore = rows.length > DEVICE_EVENTS_PAGE_SIZE;
+      const page = hasMore ? rows.slice(0, DEVICE_EVENTS_PAGE_SIZE) : rows;
+      const last = page[page.length - 1];
+      const nextCursor =
+        hasMore && last
+          ? encodeCursor({ createdAt: ISO(last.ts), id: last.event_id })
+          : undefined;
+
+      return reply.code(200).send({
+        items: page.map((r) => ({
+          eventId: r.event_id,
+          ts: ISO(r.ts),
+          type: r.type,
+          ...(r.payload != null ? { payload: r.payload as Record<string, unknown> } : {}),
+        })),
+        ...(nextCursor ? { nextCursor } : {}),
       });
     },
   );
