@@ -22,10 +22,10 @@ let app: FastifyInstance;
 let db: Kysely<Database>;
 let pool: pg.Pool;
 
-let ownerId: string;
+let _ownerId: string;
 let ownerToken: string;
 let otherId: string;
-let otherToken: string;
+let _otherToken: string;
 
 async function login(email: string, password: string): Promise<string> {
   const res = await app.inject({ method: 'POST', url: '/v1/users/login', payload: { email, password } });
@@ -91,10 +91,10 @@ beforeAll(async () => {
   db = createDb(pool);
   app = await createServer({ db, skipStorage: true });
 
-  ownerId = await seedUser(`${TAG}-owner@test.local`, ownerPassword);
+  _ownerId = await seedUser(`${TAG}-owner@test.local`, ownerPassword);
   otherId = await seedUser(`${TAG}-other@test.local`, otherPassword);
   ownerToken = await login(`${TAG}-owner@test.local`, ownerPassword);
-  otherToken = await login(`${TAG}-other@test.local`, otherPassword);
+  _otherToken = await login(`${TAG}-other@test.local`, otherPassword);
 });
 
 afterAll(async () => {

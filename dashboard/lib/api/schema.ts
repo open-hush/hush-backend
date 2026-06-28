@@ -55,10 +55,21 @@ export interface paths {
         put?: never;
         /**
          * First-boot registration of a device.
-         * @description Called once by the firmware right after WiFi credentials have been
-         *     provisioned via BLE. The device proves possession of its baked-in
-         *     per-device secret via HMAC and receives a device-scoped token plus
-         *     the initial sync payload.
+         * @description Registers a new device and returns it in the `unclaimed` state together
+         *     with a `claimCode` the user enters to claim it.
+         *
+         *     Two callers are accepted:
+         *     - A **physical device** authenticating with `deviceHmac`. Called once by
+         *       the firmware right after WiFi credentials have been provisioned via
+         *       BLE; the device proves possession of its baked-in per-device secret via
+         *       HMAC. The `virtual` field is ignored and treated as `false`.
+         *     - A **user app acting as a virtual device** authenticating with
+         *       `userJwt`. The app sends `virtual: true` to register itself as a
+         *       software-only device for the authenticated user.
+         *
+         *     Idempotent on `serial`: re-registering an existing device returns the
+         *     current record. `claimCode` is present only while the device is
+         *     `unclaimed`.
          */
         post: operations["registerDevice"];
         delete?: never;
@@ -307,6 +318,37 @@ export interface paths {
          *     endpoint does not leak which device ids exist.
          */
         patch: operations["updateDevice"];
+        trace?: never;
+    };
+    "/v1/devices/{id}/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Device identifier (UUID). */
+                id: components["parameters"]["DeviceId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List events recorded for a device.
+         * @description Returns the events the device has pushed via `POST /v1/device/events`
+         *     (card scans, button presses, errors). The mobile app uses it with
+         *     `type=card_unknown` to build the "cards to bind" list.
+         *
+         *     Scoped to the caller: a device owned by another user (or unknown)
+         *     responds `404`, never `403`, so the endpoint does not leak which device
+         *     ids exist. Results are ordered newest-first by `ts` and paginated by
+         *     opaque cursor — pass the previous response's `nextCursor` back as the
+         *     `cursor` query param. A response without `nextCursor` is the last page.
+         */
+        get: operations["listDeviceEvents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/v1/devices/{id}/claim": {
@@ -725,10 +767,19 @@ export interface components {
             firmwareVersion: string;
             /** @description BLE MAC address, lowercase hex with colons. */
             macAddress?: string;
+            /**
+             * @description Whether this is a software-only device registered by a user app via
+             *     `userJwt`. Ignored (treated as `false`) for `deviceHmac` callers.
+             * @default false
+             */
+            virtual: boolean;
         };
         DeviceRegisterResponse: {
             device: components["schemas"]["Device"];
-            /** @description Short-lived code shown to the user during pairing. */
+            /**
+             * @description Short-lived code shown to the user during pairing. Present only while
+             *     `device.state` is `unclaimed`; omitted once the device is claimed.
+             */
             claimCode?: string;
         };
         DeviceClaimRequest: {
@@ -761,6 +812,10 @@ export interface components {
         };
         DeviceEventsRequest: {
             events: components["schemas"]["DeviceEvent"][];
+        };
+        DeviceEventList: {
+            items: components["schemas"]["DeviceEvent"][];
+            nextCursor?: string;
         };
         /**
          * @description A single event emitted by the firmware. The wire shape is a
@@ -1633,6 +1688,39 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
             422: components["responses"]["Unprocessable"];
+        };
+    };
+    listDeviceEvents: {
+        parameters: {
+            query?: {
+                /** @description Opaque pagination cursor returned by a previous response. */
+                cursor?: components["parameters"]["Cursor"];
+                /**
+                 * @description Filter to a single event type (e.g. `card_unknown`). When omitted,
+                 *     every event type is returned.
+                 */
+                type?: "card_scanned" | "card_unknown" | "playback_started" | "playback_finished" | "button_pressed" | "low_battery" | "error";
+            };
+            header?: never;
+            path: {
+                /** @description Device identifier (UUID). */
+                id: components["parameters"]["DeviceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of device events, newest first. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeviceEventList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
         };
     };
     claimDevice: {

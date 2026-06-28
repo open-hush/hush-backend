@@ -348,3 +348,136 @@ describe('GET /v1/device/sync (userJwt acting as device — auth gate)', () => {
     expect(res.statusCode).toBe(401);
   });
 });
+
+describe('GET /v1/devices/:id/events (read, ownership + pagination)', () => {
+  async function seedEvent(opts: {
+    deviceId: string;
+    type:
+      | 'card_scanned'
+      | 'card_unknown'
+      | 'playback_started'
+      | 'playback_finished'
+      | 'button_pressed'
+      | 'low_battery'
+      | 'error';
+    ts: string;
+    payload?: Record<string, unknown> | null;
+  }): Promise<string> {
+    const eventId = randomUUID();
+    await db
+      .insertInto('device_events')
+      .values({
+        event_id: eventId,
+        device_id: opts.deviceId,
+        ts: new Date(opts.ts),
+        type: opts.type,
+        payload: opts.payload ?? null,
+      })
+      .execute();
+    return eventId;
+  }
+
+  it('requires authentication', async () => {
+    const id = await seedDevice({ serial: `${TAG}-evts-noauth`, ownerId, state: 'claimed' });
+    const res = await app.inject({ method: 'GET', url: `/v1/devices/${id}/events` });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it("404s on another user's device (no IDOR, no existence leak)", async () => {
+    const id = await seedDevice({ serial: `${TAG}-evts-theirs`, ownerId: otherId, state: 'claimed' });
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/devices/${id}/events`,
+      headers: auth(ownerToken),
+    });
+    expect(res.statusCode).toBe(404);
+  });
+
+  it('404s on an unknown device id', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/devices/${randomUUID()}/events`,
+      headers: auth(ownerToken),
+    });
+    expect(res.statusCode).toBe(404);
+  });
+
+  it('returns events newest-first by ts', async () => {
+    const id = await seedDevice({ serial: `${TAG}-evts-order`, ownerId, state: 'claimed' });
+    await seedEvent({ deviceId: id, type: 'button_pressed', ts: '2026-06-28T09:00:00Z' });
+    await seedEvent({ deviceId: id, type: 'low_battery', ts: '2026-06-28T09:30:00Z' });
+    await seedEvent({ deviceId: id, type: 'error', ts: '2026-06-28T09:15:00Z' });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/devices/${id}/events`,
+      headers: auth(ownerToken),
+    });
+    expect(res.statusCode).toBe(200);
+    const ts = res.json().items.map((e: { ts: string }) => e.ts);
+    expect(ts).toEqual([
+      '2026-06-28T09:30:00.000Z',
+      '2026-06-28T09:15:00.000Z',
+      '2026-06-28T09:00:00.000Z',
+    ]);
+  });
+
+  it('filters by type and returns the payload', async () => {
+    const id = await seedDevice({ serial: `${TAG}-evts-filter`, ownerId, state: 'claimed' });
+    await seedEvent({ deviceId: id, type: 'button_pressed', ts: '2026-06-28T10:00:00Z' });
+    await seedEvent({
+      deviceId: id,
+      type: 'card_unknown',
+      ts: '2026-06-28T10:05:00Z',
+      payload: { uid: '04a1b2c3d4e5' },
+    });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/devices/${id}/events?type=card_unknown`,
+      headers: auth(ownerToken),
+    });
+    expect(res.statusCode).toBe(200);
+    const items = res.json().items as Array<{ type: string; payload?: { uid: string } }>;
+    expect(items).toHaveLength(1);
+    expect(items[0]!.type).toBe('card_unknown');
+    expect(items[0]!.payload?.uid).toBe('04a1b2c3d4e5');
+  });
+
+  it('422s on an unknown type filter', async () => {
+    const id = await seedDevice({ serial: `${TAG}-evts-badtype`, ownerId, state: 'claimed' });
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/devices/${id}/events?type=not_a_type`,
+      headers: auth(ownerToken),
+    });
+    expect(res.statusCode).toBe(422);
+  });
+
+  it('paginates by cursor without overlap', async () => {
+    const id = await seedDevice({ serial: `${TAG}-evts-page`, ownerId, state: 'claimed' });
+    const total = 120;
+    for (let i = 0; i < total; i += 1) {
+      // Distinct, increasing timestamps so the keyset order is deterministic.
+      const ts = new Date(Date.UTC(2026, 5, 1, 0, 0, i)).toISOString();
+      await seedEvent({ deviceId: id, type: 'button_pressed', ts });
+    }
+
+    const seen = new Set<string>();
+    let url: string | null = `/v1/devices/${id}/events`;
+    let pages = 0;
+    while (url) {
+      const res = await app.inject({ method: 'GET', url, headers: auth(ownerToken) });
+      expect(res.statusCode).toBe(200);
+      const body = res.json() as { items: Array<{ eventId: string }>; nextCursor?: string };
+      for (const e of body.items) {
+        expect(seen.has(e.eventId)).toBe(false);
+        seen.add(e.eventId);
+      }
+      pages += 1;
+      url = body.nextCursor ? `/v1/devices/${id}/events?cursor=${encodeURIComponent(body.nextCursor)}` : null;
+      expect(pages).toBeLessThanOrEqual(5); // 120 / 50 -> 3 pages; guard against a cursor loop
+    }
+    expect(seen.size).toBe(total);
+  });
+});
