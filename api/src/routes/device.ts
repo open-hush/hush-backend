@@ -7,6 +7,8 @@ import type { S3Client } from '@aws-sdk/client-s3';
 import { z } from 'zod';
 
 import {
+  CardDownloadQuerySchema,
+  CardDownloadSchema,
   DeviceEventsQuerySchema,
   DeviceEventsRequestSchema,
   DeviceRegisterRequestSchema,
@@ -438,6 +440,94 @@ export const deviceRoutes = (deps: DeviceDeps): FastifyPluginAsyncZod => async (
           boundAt: ISO(c.bound_at),
         })),
         audio,
+      });
+    },
+  );
+
+  app.get(
+    '/device/cards/:uid/download',
+    {
+      preHandler: requireDeviceOrUser,
+      schema: {
+        params: z.object({ uid: z.string().regex(/^[0-9a-f]{8,20}$/) }),
+        querystring: CardDownloadQuerySchema,
+        response: {
+          200: CardDownloadSchema,
+          400: ErrorSchema,
+          401: ErrorSchema,
+          404: ErrorSchema,
+          409: ErrorSchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      if (!s3 || !s3Config) {
+        throw app.httpErrors.serviceUnavailable('storage not configured');
+      }
+      const deviceId = req.device?.id;
+      if (!deviceId) return reply.code(401).send({ code: 'unauthorized', message: 'unauthorized' });
+
+      const device = await db
+        .selectFrom('devices')
+        .select(['owner_id', 'state'])
+        .where('id', '=', deviceId)
+        .executeTakeFirst();
+      if (!device || device.state !== 'claimed' || !device.owner_id) {
+        return reply.code(401).send({ code: 'unauthorized', message: 'device not claimed' });
+      }
+
+      const { uid } = req.params;
+      const binding = await db
+        .selectFrom('card_bindings')
+        .select(['audio_id'])
+        .where('device_id', '=', deviceId)
+        .where('uid', '=', uid)
+        .executeTakeFirst();
+      if (!binding) {
+        return reply.code(404).send({
+          code: 'card_not_bound',
+          message: 'No audio is bound to that card UID on this device.',
+        });
+      }
+
+      // Ownership is implied by the binding (the card lives on the caller's
+      // device), but we scope the lookup by owner anyway so a stale binding to
+      // someone else's audio can never leak a presigned URL.
+      const audio = await db
+        .selectFrom('audios')
+        .select(['id', 'state', 'sha256', 'size_bytes', 'transcoded_key'])
+        .where('id', '=', binding.audio_id)
+        .where('owner_id', '=', device.owner_id)
+        .executeTakeFirst();
+
+      // A missing audio (deleted out from under a stale binding) is, from the
+      // consumer's point of view, the same "nothing to download here" as an
+      // unbound card.
+      if (!audio) {
+        return reply.code(404).send({
+          code: 'card_not_bound',
+          message: 'No audio is bound to that card UID on this device.',
+        });
+      }
+
+      if (audio.state !== 'ready' || !audio.transcoded_key || !audio.sha256) {
+        return reply.code(409).send({
+          code: 'audio_not_ready',
+          message: 'The bound audio is not ready for download yet.',
+          details: { state: audio.state },
+        });
+      }
+
+      const url = await presignGet(s3, s3Config, audio.transcoded_key, {
+        expiresInSec: SYNC_PRESIGN_TTL_SEC,
+      });
+
+      return reply.code(200).send({
+        audioId: audio.id,
+        downloadUrl: url.url,
+        sha256: audio.sha256,
+        ...(audio.size_bytes !== null ? { sizeBytes: audio.size_bytes } : {}),
+        expiresAt: url.expiresAt.toISOString(),
       });
     },
   );

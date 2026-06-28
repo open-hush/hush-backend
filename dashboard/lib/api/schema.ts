@@ -136,6 +136,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/device/cards/{uid}/download": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description RFID UID in lowercase hex (no separators). */
+                uid: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * On-demand presigned download link for the audio bound to a card.
+         * @description Resolves a scanned card UID to its bound audio and returns a fresh
+         *     presigned download link **without** a full `GET /v1/device/sync`. Use
+         *     this to refresh an expired URL: a device waking from deep sleep can
+         *     re-presign a single track instead of re-presigning the whole library.
+         *
+         *     Two callers are accepted (same model as `GET /v1/device/sync`):
+         *     - A **physical device** authenticating with `deviceHmac`; the device is
+         *       resolved from the HMAC `keyId`.
+         *     - A **user app acting as a device** authenticating with `userJwt`. In
+         *       this case `device_id` is **required** and must reference a claimed
+         *       device owned by the caller.
+         *
+         *     The bound audio must be `ready`; otherwise the call returns `409`.
+         */
+        get: operations["getCardDownload"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/users": {
         parameters: {
             query?: never;
@@ -1042,6 +1077,23 @@ export interface components {
             /** Format: date-time */
             expiresAt: string;
         };
+        /**
+         * @description On-demand presigned download link for the audio bound to a single card.
+         *     Mirrors a single `AudioSyncEntry` resolved by card UID.
+         */
+        CardDownload: {
+            /** Format: uuid */
+            audioId: string;
+            /**
+             * Format: uri
+             * @description Presigned GET URL valid until `expiresAt`.
+             */
+            downloadUrl: string;
+            sha256: string;
+            sizeBytes?: number;
+            /** Format: date-time */
+            expiresAt: string;
+        };
         CardBinding: {
             /** @description RFID UID, lowercase hex, no separators. */
             uid: string;
@@ -1397,6 +1449,59 @@ export interface operations {
             404: components["responses"]["NotFound"];
             422: components["responses"]["Unprocessable"];
             429: components["responses"]["TooManyRequests"];
+        };
+    };
+    getCardDownload: {
+        parameters: {
+            query?: {
+                /**
+                 * @description Target device UUID. Ignored for `deviceHmac` callers (the device is
+                 *     taken from the signature). **Required** for `userJwt` callers and
+                 *     must reference a claimed device owned by the caller.
+                 */
+                device_id?: string;
+            };
+            header?: never;
+            path: {
+                /** @description RFID UID in lowercase hex (no separators). */
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Presigned download link for the bound audio. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CardDownload"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            /**
+             * @description No binding for the given UID on the target device, or the device is
+             *     unknown to the authenticated user.
+             */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The bound audio is not ready for download. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     listUsers: {
