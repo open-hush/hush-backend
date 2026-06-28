@@ -295,6 +295,23 @@ export const CardBindingListSchema = z.object({
   items: z.array(CardBindingSchema),
 });
 
+// On-demand presigned download link for the audio bound to a single card.
+// Mirrors a single `AudioSyncEntry` resolved by card UID (see hush-protocol
+// `CardDownload`).
+export const CardDownloadSchema = z.object({
+  audioId: z.string().uuid(),
+  downloadUrl: z.string().url(),
+  sha256: z.string().regex(/^[0-9a-f]{64}$/),
+  sizeBytes: z.number().int().nonnegative().optional(),
+  expiresAt: z.string().datetime(),
+});
+
+export const CardDownloadQuerySchema = z.object({
+  // Required only for `userJwt` callers (app acting as a device); ignored for
+  // `deviceHmac` callers, which resolve the device from the signature keyId.
+  device_id: z.string().uuid().optional(),
+});
+
 // Phase 5 — firmware OTA
 
 export const HW_REV_RE = /^r[0-9]+$/;
